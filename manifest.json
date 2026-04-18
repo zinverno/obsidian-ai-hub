@@ -1,0 +1,9 @@
+{
+	"id": "obsidian-ai-hub",
+	"name": "Obsidian AI Hub",
+	"version": "1.0.0",
+	"minAppVersion": "1.4.0",
+	"description": "AI дополнения, поиск по хранилищу и Dataview через OpenRouter (Qwen).",
+	"author": "Zinvernix",
+	"isDesktopOnly": false
+}
