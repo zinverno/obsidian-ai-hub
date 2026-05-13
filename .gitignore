@@ -1,5 +1,1 @@
-node_modules/
-*.js
-*.js.map
-.esbuild
-.DS_Store
+Nothing should be ignored based on the provided changes. The only file added is README.md, which is a source/config file and should not be ignored.
