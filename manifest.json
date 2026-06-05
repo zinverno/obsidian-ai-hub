@@ -1,9 +1,9 @@
 {
 	"id": "obsidian-ai-hub",
 	"name": "Obsidian AI Hub",
-	"version": "1.0.0",
+	"version": "1.1.0",
 	"minAppVersion": "1.4.0",
-	"description": "AI дополнения, поиск по хранилищу и Dataview через OpenRouter (Qwen).",
+	"description": "ИИ-ассистент для заметок: помощь с текстом, аудит хранилища и Dataview. Работает через OpenRouter, OpenAI, Groq или локально через Ollama.",
 	"author": "Zinvernix",
 	"isDesktopOnly": false
 }

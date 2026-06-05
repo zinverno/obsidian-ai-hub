@@ -642,8 +642,8 @@ export default class AIHubPlugin extends Plugin {
       1;
     const estimatedMinutes = Math.ceil(
       (estimatedBatches * (effectiveConfig.delayBetweenBatchesMs + 3000)) /
-        effectiveConfig.maxConcurrent /
-        60000,
+      effectiveConfig.maxConcurrent /
+      60000,
     );
     const confirmed = await this.confirmDeepAudit(
       files.length,
@@ -1830,7 +1830,7 @@ class SimplePromptModal extends Modal {
       const preview = contentEl.createDiv({ cls: "ai-hub-context-preview" });
       preview.setText(
         this.opts.selectionPreview.trim().slice(0, 160) +
-          (this.opts.selectionPreview.length > 160 ? "…" : ""),
+        (this.opts.selectionPreview.length > 160 ? "…" : ""),
       );
     }
 
@@ -1838,12 +1838,12 @@ class SimplePromptModal extends Modal {
     const chipsData =
       this.opts.mode === "selection"
         ? [
-            "Улучши стиль",
-            "Сократи",
-            "Объясни",
-            "Переведи на EN",
-            "Исправь ошибки",
-          ]
+          "Улучши стиль",
+          "Сократи",
+          "Объясни",
+          "Переведи на EN",
+          "Исправь ошибки",
+        ]
         : ["Добавь резюме", "Дополни идеи", "Структурируй", "Добавь теги"];
 
     const chipsRow = contentEl.createDiv({ cls: "ai-hub-chips" });
@@ -2191,9 +2191,9 @@ export class BatchProcessModal extends Modal {
   getFilesToProcess(): TFile[] {
     const tagsToFind = this.filterTags.trim()
       ? this.filterTags
-          .split(",")
-          .map((t) => t.trim().toLowerCase().replace(/^#/, ""))
-          .filter(Boolean)
+        .split(",")
+        .map((t) => t.trim().toLowerCase().replace(/^#/, ""))
+        .filter(Boolean)
       : [];
     const dateFromTs = this.filterDateFrom
       ? new Date(this.filterDateFrom).getTime()
@@ -2448,34 +2448,34 @@ class AuditModeModal extends Modal {
 
     // ── BATCH режим ──────────────────────────────────────────────────
     const batchToProcess = stats.stale + stats.unseen;
-    this.createModeCard(modesGrid, {
-      icon: "layers",
-      title: "Batch Аудит",
-      badge:
-        batchToProcess > 0 ? `${batchToProcess} к обработке` : "Всё актуально",
-      badgeColor:
-        batchToProcess > 0
-          ? "var(--interactive-accent)"
-          : "var(--color-green,#4caf50)",
-      lines: [
-        `По ${this.plugin.settings.deepAudit.batchSize} файлов за запрос`,
-        "Параллельные запросы к API",
-        "Инкрементальный (пропускает кэш)",
-        "Финальный отчёт + Canvas-карта",
-      ],
-      speed: "Быстрый",
-      context: "~4 000 симв./файл",
-      onClick: () => {
-        this.close();
-        void this.plugin.runDeepVaultAudit();
-      },
-    });
+    // this.createModeCard(modesGrid, {
+    //   icon: "layers",
+    //   title: "Batch Аудит",
+    //   badge:
+    //     batchToProcess > 0 ? `${batchToProcess} к обработке` : "Всё актуально",
+    //   badgeColor:
+    //     batchToProcess > 0
+    //       ? "var(--interactive-accent)"
+    //       : "var(--color-green,#4caf50)",
+    //   lines: [
+    //     `По ${this.plugin.settings.deepAudit.batchSize} файлов за запрос`,
+    //     "Параллельные запросы к API",
+    //     "Инкрементальный (пропускает кэш)",
+    //     "Финальный отчёт + Canvas-карта",
+    //   ],
+    //   speed: "Быстрый",
+    //   context: "~4 000 симв./файл",
+    //   onClick: () => {
+    //     this.close();
+    //     void this.plugin.runDeepVaultAudit();
+    //   },
+    // });
 
     // ── SINGLE режим ─────────────────────────────────────────────────
     const singleToProcess = this.index.getStaleFiles(this.files).length;
     const estMinSingle = Math.ceil(
       (singleToProcess * (this.plugin.settings.deepAudit.delayMs + 5000)) /
-        60000,
+      60000,
     );
 
     this.createModeCard(modesGrid, {
