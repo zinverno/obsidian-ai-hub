@@ -1,7 +1,7 @@
 {
 	"id": "ai-knowledge-hub",
 	"name": "AI Hub",
-	"version": "1.1.2",
+	"version": "1.1.3",
 	"minAppVersion": "1.4.0",
 	"description": "AI assistant for your notes: text editing, vault audit and Dataview support. Works with OpenRouter, OpenAI, Groq or locally via Ollama.",
 	"author": "Zinvernix",
