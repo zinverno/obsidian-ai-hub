@@ -715,8 +715,10 @@ export class DeepAuditProgressModal extends Modal {
   onOpen() {
     const root = this.contentEl.createDiv({ cls: "ai-hub-progress-root" });
 
-    this.stageEl = root.createEl("h3", { text: "Подготовка..." });
-    this.stageEl.style.margin = "0 0 10px 0";
+    this.stageEl = root.createEl("h3", {
+      text: "Подготовка...",
+      cls: "ai-hub-progress-stage",
+    });
 
     this.barEl = root.createEl("progress", { cls: "ai-hub-progress-bar" });
     this.barEl.max = 100;
@@ -726,9 +728,9 @@ export class DeepAuditProgressModal extends Modal {
       cls: "ai-hub-progress-text",
       text: "Инициализация...",
     });
-    this.etaEl = root.createDiv({ cls: "ai-hub-progress-text" });
-    this.etaEl.style.color = "var(--text-muted)";
-    this.etaEl.style.fontSize = "0.85em";
+    this.etaEl = root.createDiv({
+      cls: "ai-hub-progress-text ai-hub-progress-eta",
+    });
 
     this.logEl = root.createDiv({ cls: "ai-hub-progress-log" });
 
@@ -1076,14 +1078,13 @@ export class SingleAuditProgressModal extends Modal {
     this.barEl.value = 0;
 
     // Статистика
-    this.statsEl = root.createDiv();
-    this.statsEl.style.cssText =
-      "display:flex;gap:16px;font-size:0.85em;padding:4px 0;";
-    this.statsEl.innerHTML = "<span>✓ 0</span><span>⟳ 0</span><span>✗ 0</span>";
+    this.statsEl = root.createDiv({ cls: "ai-hub-progress-stats" });
+    this.renderStats();
 
     // ETA
-    this.etaEl = root.createDiv({ cls: "ai-hub-progress-text" });
-    this.etaEl.style.cssText = "font-size:0.82em;color:var(--text-muted);";
+    this.etaEl = root.createDiv({
+      cls: "ai-hub-progress-text ai-hub-progress-eta",
+    });
 
     // Лог
     this.logEl = root.createDiv({ cls: "ai-hub-progress-log" });
@@ -1091,9 +1092,7 @@ export class SingleAuditProgressModal extends Modal {
     this.logEl.setAttribute("aria-live", "polite");
 
     // Кнопка остановки
-    const btnRow = root.createDiv();
-    btnRow.style.cssText =
-      "display:flex;justify-content:flex-end;padding-top:4px;";
+    const btnRow = root.createDiv({ cls: "ai-hub-progress-btnrow" });
     new Setting(btnRow).addButton((btn) =>
       btn
         .setButtonText("Остановить")
@@ -1106,6 +1105,22 @@ export class SingleAuditProgressModal extends Modal {
           new Notice("⏹ Остановка после текущего файла...");
         }),
     );
+  }
+
+  private renderStats(): void {
+    this.statsEl.empty();
+    this.statsEl.createEl("span", {
+      text: `✓ ${this.counts.done}`,
+      cls: "ai-hub-stat-done",
+    });
+    this.statsEl.createEl("span", {
+      text: `⟳ ${this.counts.skipped}`,
+      cls: "ai-hub-stat-skip",
+    });
+    this.statsEl.createEl("span", {
+      text: `✗ ${this.counts.error}`,
+      cls: "ai-hub-stat-error",
+    });
   }
 
   private update(
@@ -1131,11 +1146,7 @@ export class SingleAuditProgressModal extends Modal {
         : `${pct}% — ${current}/${total}`,
     );
 
-    this.statsEl.innerHTML = [
-      `<span style="color:var(--color-green,#4caf50)">✓ ${this.counts.done}</span>`,
-      `<span style="color:var(--text-muted)">⟳ ${this.counts.skipped}</span>`,
-      `<span style="color:var(--color-red,#f44336)">✗ ${this.counts.error}</span>`,
-    ].join("");
+    this.renderStats();
 
     // ETA
     const elapsed = Date.now() - this.startTime;

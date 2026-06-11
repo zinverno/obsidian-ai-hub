@@ -47,434 +47,6 @@ import {
 } from "./deepAudit";
 import { NoteIndexManager, IndexStats } from "./noteIndex";
 
-// === ВСТРОЕННЫЕ СТИЛИ ===
-const AI_HUB_CSS = `
-/* === AI HUB DESIGN SYSTEM === */
-:root {
-    --ai-radius-sm: 4px;
-    --ai-radius-md: 8px;
-    --ai-radius-lg: 12px;
-    --ai-radius-xl: 20px;
-    --ai-transition-fast: 150ms ease;
-    --ai-transition-base: 200ms ease;
-    --ai-transition-slow: 300ms ease;
-    --ai-shadow-sm: 0 1px 3px rgba(0,0,0,0.10), 0 1px 2px rgba(0,0,0,0.06);
-    --ai-shadow-md: 0 4px 12px rgba(0,0,0,0.14), 0 2px 4px rgba(0,0,0,0.08);
-    --ai-shadow-lg: 0 10px 30px rgba(0,0,0,0.18), 0 4px 8px rgba(0,0,0,0.10);
-    --ai-space-xs:  4px;
-    --ai-space-sm:  8px;
-    --ai-space-md: 12px;
-    --ai-space-lg: 16px;
-    --ai-space-xl: 24px;
-    --ai-space-2xl: 32px;
-}
-@keyframes ai-hub-fade-in {
-    from { opacity: 0; transform: translateY(-6px); }
-    to   { opacity: 1; transform: translateY(0);    }
-}
-@keyframes ai-hub-spin { to { transform: rotate(360deg); } }
-@keyframes ai-hub-pulse { 0%,100% { opacity:.6; } 50% { opacity:1; } }
-@keyframes ai-hub-progress-shine {
-    0%   { background-position: -200% center; }
-    100% { background-position:  200% center; }
-}
-
-/* Модалка */
-.ai-hub-modal-content {
-    padding: 0 4px;
-    animation: ai-hub-fade-in var(--ai-transition-base);
-}
-
-.ai-hub-modal-header {
-    margin-bottom: 18px;
-    border-bottom: 2px solid var(--background-modifier-border);
-    padding-bottom: 14px;
-}
-
-.ai-hub-modal-header h2 {
-    margin: 0;
-    font-size: 1.25em;
-    font-weight: 700;
-    letter-spacing: -0.02em;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    line-height: 1.3;
-}
-
-.ai-hub-modal-header p {
-    margin: 6px 0 0;
-    color: var(--text-muted);
-    font-size: 0.88em;
-    line-height: 1.5;
-}
-
-.ai-hub-accent-icon {
-    color: var(--interactive-accent);
-    display: inline-flex;
-    align-items: center;
-}
-
-/* Фильтры */
-.ai-hub-filters {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 12px;
-    margin-bottom: 16px;
-    background: var(--background-secondary);
-    padding: 12px;
-    border-radius: 8px;
-    border: 1px solid var(--background-modifier-border);
-}
-
-.ai-hub-filters .setting-item {
-    padding: 0;
-    margin: 0;
-    border: none;
-    flex-direction: column;
-    align-items: flex-start;
-}
-
-.ai-hub-filters .setting-item-info {
-    margin-bottom: 4px;
-}
-
-.ai-hub-filters .setting-item-name {
-    font-size: 0.85em;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-}
-
-.ai-hub-filters .setting-item-control {
-    width: 100%;
-    justify-content: flex-start;
-}
-
-.ai-hub-filters select,
-.ai-hub-filters input[type="text"],
-.ai-hub-filters input[type="date"] {
-    width: 100%;
-    padding: 4px 8px;
-    height: 32px;
-}
-
-/* Сетка пресетов — КАРТОЧКИ */
-.ai-hub-grid {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 10px;
-    margin-bottom: 20px;
-    margin-top: 10px;
-}
-
-.ai-hub-card {
-    padding: 14px;
-    border: 1px solid var(--background-modifier-border);
-    border-radius: var(--ai-radius-lg, 12px);
-    cursor: pointer;
-    background: var(--background-primary);
-    transition: all var(--ai-transition-base, 0.2s ease);
-    display: flex;
-    flex-direction: column;
-    gap: 5px;
-    user-select: none;
-    outline: none;
-    box-shadow: var(--ai-shadow-sm);
-}
-
-.ai-hub-card:hover {
-    border-color: var(--interactive-accent);
-    background: var(--background-modifier-hover);
-    transform: translateY(-3px);
-    box-shadow: var(--ai-shadow-md);
-}
-
-.ai-hub-card:active {
-    transform: translateY(-1px);
-    box-shadow: var(--ai-shadow-sm);
-}
-
-.ai-hub-card:focus-visible {
-    outline: 2px solid var(--interactive-accent);
-    outline-offset: 2px;
-    border-radius: var(--ai-radius-lg, 12px);
-}
-
-.theme-dark .ai-hub-card:hover  { background: rgba(255,255,255,0.06); }
-.theme-light .ai-hub-card:hover { background: rgba(0,0,0,0.04); }
-
-.ai-hub-card-icon {
-    width: 30px;
-    height: 30px;
-    border-radius: var(--ai-radius-sm, 4px);
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    background: rgba(127,127,255,0.12);
-    color: var(--interactive-accent);
-    margin-bottom: 6px;
-    flex-shrink: 0;
-}
-
-.ai-hub-card-title {
-    font-weight: 600;
-    font-size: 0.95em;
-    color: var(--text-normal);
-    line-height: 1.3;
-}
-
-.ai-hub-card-desc {
-    font-size: 0.82em;
-    color: var(--text-muted);
-    line-height: 1.4;
-}
-
-/* Быстрый ввод */
-.ai-hub-prompt-modal .modal-content {
-    min-width: 480px;
-    padding: 16px;
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-}
-
-.ai-hub-prompt-header {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    color: var(--text-normal);
-    font-size: 1.1em;
-    font-weight: 700;
-    letter-spacing: -0.01em;
-    padding-bottom: 12px;
-    border-bottom: 1px solid var(--background-modifier-border);
-    margin-bottom: 4px;
-}
-
-.ai-hub-prompt-textarea {
-    width: 100%;
-    min-height: 90px;
-    padding: 12px;
-    border-radius: var(--ai-radius-md, 8px);
-    border: 1px solid var(--background-modifier-border);
-    background: var(--background-modifier-form-field);
-    color: var(--text-normal);
-    font-family: var(--font-text);
-    font-size: 0.95em;
-    line-height: 1.6;
-    resize: vertical;
-    outline: none;
-    transition: border-color var(--ai-transition-fast), box-shadow var(--ai-transition-fast);
-}
-
-.ai-hub-prompt-textarea:focus {
-    border-color: var(--interactive-accent);
-    box-shadow: 0 0 0 2px rgba(127,127,255,0.15);
-}
-
-.ai-hub-prompt-footer {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-top: 4px;
-    gap: 8px;
-}
-
-/* Прогресс */
-.ai-hub-progress-root {
-    padding: 20px 4px 8px;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-}
-
-.ai-hub-progress-bar {
-    width: 100%;
-    height: 10px;
-    border-radius: 5px;
-    overflow: hidden;
-    -webkit-appearance: none;
-    appearance: none;
-    border: none;
-    background: var(--background-modifier-border);
-    display: block;
-}
-.ai-hub-progress-bar::-webkit-progress-bar {
-    background: var(--background-modifier-border);
-    border-radius: 5px;
-}
-.ai-hub-progress-bar::-webkit-progress-value {
-    background: linear-gradient(90deg, var(--interactive-accent), var(--color-blue, var(--interactive-accent)));
-    border-radius: 5px;
-    transition: width 0.35s ease;
-}
-.ai-hub-progress-bar::-moz-progress-bar {
-    background: linear-gradient(90deg, var(--interactive-accent), var(--color-blue, var(--interactive-accent)));
-    border-radius: 5px;
-}
-
-.ai-hub-progress-text {
-    text-align: center;
-    font-size: 0.88em;
-    color: var(--text-muted);
-    font-variant-numeric: tabular-nums;
-    line-height: 1.4;
-}
-
-.ai-hub-progress-log {
-    max-height: 280px;
-    overflow-y: auto;
-    font-size: 0.82em;
-    font-family: var(--font-monospace);
-    background: var(--background-secondary);
-    padding: 10px 12px;
-    border-radius: var(--ai-radius-md, 8px);
-    margin-top: 4px;
-    border: 1px solid var(--background-modifier-border);
-    scroll-behavior: smooth;
-}
-
-.ai-hub-log-entry {
-    margin: 2px 0;
-    padding: 2px 0;
-    display: flex;
-    align-items: baseline;
-    gap: 6px;
-    line-height: 1.4;
-}
-.ai-hub-log-pending { color: var(--text-muted); }
-.ai-hub-log-success { color: var(--color-green, #4caf50); }
-.ai-hub-log-error   { color: var(--color-red,   #f44336); }
-
-/* Подтверждение */
-.ai-hub-confirm-title { font-weight: 600; font-size: 1.05em; }
-.ai-hub-confirm-count { color: var(--text-muted); }
-
-.ai-hub-query-box {
-    padding: 12px 16px;
-    background: var(--background-secondary);
-    border-left: 3px solid var(--interactive-accent);
-    border-radius: var(--ai-radius-md, 8px);
-    margin: 10px 0;
-    font-family: var(--font-monospace);
-    font-size: 0.88em;
-    line-height: 1.6;
-    white-space: pre-wrap;
-    word-break: break-word;
-}
-
-.ai-hub-warning {
-    display: flex;
-    align-items: flex-start;
-    gap: 8px;
-    padding: 10px 12px;
-    border-radius: var(--ai-radius-md, 8px);
-    background: rgba(255, 200, 0, 0.08);
-    border: 1px solid rgba(255, 200, 0, 0.25);
-    color: var(--text-warning, #e8a000);
-    font-size: 0.88em;
-    line-height: 1.5;
-    margin: 8px 0;
-}
-
-/* Счётчик */
-.ai-hub-count {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 6px 12px;
-    border-radius: var(--ai-radius-xl, 20px);
-    background: var(--background-secondary);
-    border: 1px solid var(--background-modifier-border);
-    font-size: 0.88em;
-    font-weight: 500;
-    color: var(--text-muted);
-    font-variant-numeric: tabular-nums;
-}
-
-/* Spinner */
-.ai-hub-spinner {
-    display: inline-block;
-    width: 16px;
-    height: 16px;
-    border: 2px solid var(--background-modifier-border);
-    border-top-color: var(--interactive-accent);
-    border-radius: 50%;
-    animation: ai-hub-spin 0.7s linear infinite;
-    flex-shrink: 0;
-}
-
-/* Настройки */
-.ai-setting-icon {
-    width: 18px;
-    height: 18px;
-    margin-right: 8px;
-    color: var(--interactive-accent);
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    vertical-align: middle;
-    flex-shrink: 0;
-}
-
-.ai-hub-settings-separator {
-    margin: 24px 0;
-    border: none;
-    height: 1px;
-    background: linear-gradient(90deg, transparent, var(--background-modifier-border), transparent);
-}
-
-/* Prompt textarea focus ring */
-.ai-hub-prompt-textarea:focus-visible {
-    outline: none;
-    border-color: var(--interactive-accent);
-    box-shadow: 0 0 0 2px rgba(127,127,255,0.2);
-}
-
-/* Custom prompt wrapper */
-.ai-hub-custom-prompt {
-    margin-bottom: 20px;
-    padding: 14px;
-    border: 1px solid var(--background-modifier-border);
-    border-radius: var(--ai-radius-lg, 12px);
-    background: var(--background-secondary);
-    transition: border-color var(--ai-transition-fast);
-}
-.ai-hub-custom-prompt:focus-within {
-    border-color: var(--interactive-accent);
-}
-.ai-hub-custom-prompt h4 { margin: 0 0 10px; font-size: 0.9em; font-weight: 600; }
-.ai-hub-custom-prompt textarea {
-    width: 100%;
-    min-height: 80px;
-    padding: 10px;
-    border-radius: var(--ai-radius-md, 8px);
-    border: 1px solid var(--background-modifier-border);
-    background: var(--background-primary);
-    resize: vertical;
-    margin-bottom: 8px;
-    font-family: var(--font-text);
-    font-size: 0.92em;
-    color: var(--text-normal);
-    line-height: 1.6;
-    transition: border-color var(--ai-transition-fast);
-}
-.ai-hub-custom-prompt textarea:focus {
-    border-color: var(--interactive-accent);
-    outline: none;
-    box-shadow: 0 0 0 2px rgba(127,127,255,0.15);
-}
-`;
-
-function injectStyles() {
-  if (document.getElementById("ai-hub-styles")) return;
-  const styleEl = document.createElement("style");
-  styleEl.id = "ai-hub-styles";
-  styleEl.textContent = AI_HUB_CSS;
-  document.head.appendChild(styleEl);
-}
-
 type Mode = "simple" | "selection" | "vault";
 
 interface VaultAuditStats {
@@ -491,7 +63,6 @@ export default class AIHubPlugin extends Plugin {
 
   async onload() {
     try {
-      injectStyles();
       await this.loadSettings();
 
       this.addRibbonIcon("sparkles", "AI Hub: Панель управления", () => {
@@ -741,22 +312,16 @@ export default class AIHubPlugin extends Plugin {
         { icon: "clock", label: "Примерное время", value: `~${minutes} мин` },
       ];
       statsData.forEach(({ icon, label, value }) => {
-        const row = stats.createDiv();
-        row.style.cssText =
-          "display:flex;align-items:center;gap:8px;padding:3px 0;";
-        const iconEl = row.createSpan();
+        const row = stats.createDiv({ cls: "ai-hub-cost-row" });
+        const iconEl = row.createSpan({ cls: "ai-hub-cost-icon" });
         setIcon(iconEl, icon);
-        iconEl.style.cssText =
-          "color:var(--interactive-accent);flex-shrink:0;width:16px;";
-        const labelEl = row.createSpan({ text: `${label}: ` });
-        labelEl.style.color = "var(--text-muted)";
-        const valEl = row.createSpan({ text: value });
-        valEl.style.fontWeight = "600";
+        row.createSpan({ text: `${label}: `, cls: "ai-hub-cost-label" });
+        row.createSpan({ text: value, cls: "ai-hub-cost-val" });
       });
       stats.createDiv({
         text: "Стоимость зависит от вашего провайдера и тарифа",
-      }).style.cssText =
-        "margin-top:8px;font-size:0.82em;color:var(--text-faint);";
+        cls: "ai-hub-cost-note",
+      });
 
       c.createDiv({
         text: "На бесплатном тире OpenRouter возможны ошибки rate-limit. Ничего в хранилище не изменяется.",
@@ -1127,7 +692,6 @@ ${report.actionPlan}
 
       try {
         const cursor = editor.getCursor("from");
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const pos = (editor as any).coordsAtPos(cursor.ch);
         if (pos && "left" in pos) {
           menu.showAtPosition({ x: pos.left, y: pos.top });
@@ -1212,7 +776,6 @@ ${report.actionPlan}
 
     menu.addSeparator();
     menu.addItem((item) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const submenu = (
         item.setTitle("AI Hub").setIcon("sparkles") as any
       ).setSubmenu();
@@ -1625,14 +1188,13 @@ class ProgressModal extends Modal {
   onOpen() {
     const root = this.contentEl.createDiv({ cls: "ai-hub-progress-root" });
 
-    const statusRow = root.createDiv();
-    statusRow.style.cssText = "display:flex;align-items:center;gap:10px;";
+    const statusRow = root.createDiv({ cls: "ai-hub-status-row" });
     this.spinner = statusRow.createSpan({ cls: "ai-hub-spinner" });
     this.text = statusRow.createDiv({
       cls: "ai-hub-progress-text",
       text: "Сбор данных...",
     });
-    this.text.style.margin = "0";
+    this.text.addClass("ai-hub-status-text");
 
     this.bar = root.createEl("progress", { cls: "ai-hub-progress-bar" });
     this.bar.setAttribute("aria-label", "Прогресс операции");
@@ -1646,7 +1208,7 @@ class ProgressModal extends Modal {
     this.bar.value = percent;
     this.bar.setAttribute("aria-valuenow", String(percent));
     this.text.setText(`Обработано: ${current} / ${total} — ${percent}%`);
-    if (percent >= 100) this.spinner.style.display = "none";
+    if (percent >= 100) this.spinner.addClass("ai-hub-hidden");
   }
 }
 
@@ -1667,14 +1229,13 @@ class BatchProgressModal extends Modal {
   onOpen() {
     const root = this.contentEl.createDiv({ cls: "ai-hub-progress-root" });
 
-    const statusRow = root.createDiv();
-    statusRow.style.cssText = "display:flex;align-items:center;gap:10px;";
+    const statusRow = root.createDiv({ cls: "ai-hub-status-row" });
     this.spinner = statusRow.createSpan({ cls: "ai-hub-spinner" });
     this.text = statusRow.createDiv({
       cls: "ai-hub-progress-text",
       text: `0 / ${this.total}`,
     });
-    this.text.style.margin = "0";
+    this.text.addClass("ai-hub-status-text");
 
     this.bar = root.createEl("progress", { cls: "ai-hub-progress-bar" });
     this.bar.setAttribute("aria-label", "Прогресс обработки заметок");
@@ -1686,9 +1247,7 @@ class BatchProgressModal extends Modal {
     this.log.setAttribute("aria-live", "polite");
     this.log.setAttribute("aria-label", "Журнал обработки");
 
-    const btnRow = root.createDiv();
-    btnRow.style.cssText =
-      "display:flex;justify-content:flex-end;padding-top:4px;";
+    const btnRow = root.createDiv({ cls: "ai-hub-progress-btnrow" });
     new Setting(btnRow).addButton((btn) =>
       btn
         .setButtonText("Остановить")
@@ -1696,7 +1255,7 @@ class BatchProgressModal extends Modal {
         .setWarning()
         .onClick(() => {
           this.isCancelled = true;
-          this.spinner.style.display = "none";
+          this.spinner.addClass("ai-hub-hidden");
           new Notice("⏹ Остановка после текущей заметки...");
         }),
     );
@@ -1872,16 +1431,11 @@ class SimplePromptModal extends Modal {
     }
 
     // ── Счётчик символов ──────────────────────────────────────────
-    const charRow = contentEl.createDiv();
-    charRow.style.cssText =
-      "text-align:right;font-size:0.76em;color:var(--text-faint);margin-top:4px;transition:color 0.2s;";
+    const charRow = contentEl.createDiv({ cls: "ai-hub-char-row" });
     const updateCounter = () => {
       const len = textarea.value.length;
       charRow.setText(`${len} / ${this.maxLength}`);
-      charRow.style.color =
-        len > this.maxLength * 0.85
-          ? "var(--text-warning, orange)"
-          : "var(--text-faint)";
+      charRow.toggleClass("ai-hub-char-warn", len > this.maxLength * 0.85);
     };
     updateCounter();
     textarea.addEventListener("input", updateCounter);
@@ -1889,12 +1443,10 @@ class SimplePromptModal extends Modal {
     // ── Footer: подсказка + кнопки ────────────────────────────────
     const footer = contentEl.createDiv({ cls: "ai-hub-prompt-footer" });
 
-    const hint = footer.createSpan();
-    hint.style.cssText = "font-size:0.76em;color:var(--text-faint);";
+    const hint = footer.createSpan({ cls: "ai-hub-hint" });
     hint.setText("⌘/Ctrl+Enter — отправить · Esc — отмена");
 
-    const btnGroup = footer.createDiv();
-    btnGroup.style.cssText = "display:flex;gap:8px;";
+    const btnGroup = footer.createDiv({ cls: "ai-hub-btn-group" });
 
     new ButtonComponent(btnGroup)
       .setButtonText("Отмена")
@@ -1976,12 +1528,9 @@ export class BatchProcessModal extends Modal {
   private renderHeader(container: HTMLElement) {
     const header = container.createDiv({ cls: "ai-hub-modal-header" });
 
-    const h2 = header.createEl("h2");
-    h2.style.cssText =
-      "display:flex;align-items:center;gap:10px;justify-content:space-between;width:100%;";
+    const h2 = header.createEl("h2", { cls: "ai-hub-modal-h2" });
 
-    const titleRow = h2.createDiv();
-    titleRow.style.cssText = "display:flex;align-items:center;gap:8px;";
+    const titleRow = h2.createDiv({ cls: "ai-hub-title-row" });
     const iconSpan = titleRow.createSpan({ cls: "ai-hub-accent-icon" });
     setIcon(iconSpan, "package");
     titleRow.createSpan({ text: "Массовая обработка" });
@@ -2065,12 +1614,12 @@ export class BatchProcessModal extends Modal {
     toggle.createSpan({ text: "Показать файлы" });
 
     this.previewListEl = previewWrap.createDiv({ cls: "ai-hub-preview-list" });
-    this.previewListEl.style.display = "none";
+    this.previewListEl.addClass("ai-hub-hidden");
 
     toggle.addEventListener("click", () => {
       this.previewOpen = !this.previewOpen;
       if (this.previewListEl) {
-        this.previewListEl.style.display = this.previewOpen ? "block" : "none";
+        this.previewListEl.toggleClass("ai-hub-hidden", !this.previewOpen);
       }
       if (this.previewToggleIconEl) {
         this.previewToggleIconEl.classList.toggle("open", this.previewOpen);
@@ -2179,9 +1728,7 @@ export class BatchProcessModal extends Modal {
   }
 
   private renderFooter(container: HTMLElement) {
-    const footer = container.createDiv();
-    footer.style.cssText =
-      "display:flex;justify-content:flex-end;padding-top:8px;";
+    const footer = container.createDiv({ cls: "ai-hub-footer-row" });
     new ButtonComponent(footer)
       .setButtonText("Закрыть")
       .setIcon("x")
@@ -2394,35 +1941,25 @@ class AuditModeModal extends Modal {
     const stats = this.index.stats(this.files);
 
     // Блок текущего состояния индекса
-    const statusCard = contentEl.createDiv();
-    statusCard.style.cssText = [
-      "padding: 12px 14px",
-      "background: var(--background-secondary)",
-      "border-radius: 10px",
-      "border: 1px solid var(--background-modifier-border)",
-      "margin-bottom: 16px",
-      "font-size: 0.88em",
-    ].join(";");
+    const statusCard = contentEl.createDiv({ cls: "ai-hub-status-card" });
 
-    const statusRow = statusCard.createDiv();
-    statusRow.style.cssText =
-      "display:flex;align-items:center;gap:8px;font-weight:600;margin-bottom:8px;";
-    const sIcon = statusRow.createSpan();
+    const statusRow = statusCard.createDiv({ cls: "ai-hub-index-status-row" });
+    const sIcon = statusRow.createSpan({ cls: "ai-hub-accent-color" });
     setIcon(sIcon, "database");
-    sIcon.style.color = "var(--interactive-accent)";
     statusRow.createSpan({ text: "Состояние индекса" });
 
-    const grid = statusCard.createDiv();
-    grid.style.cssText =
-      "display:grid;grid-template-columns:1fr 1fr;gap:4px 16px;color:var(--text-muted);";
+    const grid = statusCard.createDiv({ cls: "ai-hub-stat-grid" });
 
     const addStat = (label: string, value: string | number, color?: string) => {
-      const row = grid.createDiv();
-      row.style.cssText = "display:flex;justify-content:space-between;";
+      const row = grid.createDiv({ cls: "ai-hub-stat-grid-row" });
       row.createSpan({ text: label });
       const val = row.createSpan({ text: String(value) });
-      if (color) val.style.color = color;
-      else val.style.fontWeight = "600";
+      if (color) {
+        val.addClass("ai-hub-stat-val-colored");
+        val.setCssProps({ "--ai-stat-color": color });
+      } else {
+        val.addClass("ai-hub-stat-val");
+      }
     };
 
     addStat("Всего заметок", stats.total);
@@ -2557,38 +2094,26 @@ class AuditModeModal extends Modal {
     card.setAttribute("aria-label", `Режим: ${opts.title}`);
 
     // Иконка + заголовок
-    const topRow = card.createDiv();
-    topRow.style.cssText =
-      "display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:8px;";
+    const topRow = card.createDiv({ cls: "ai-hub-card-top" });
     const iconEl = topRow.createDiv({ cls: "ai-hub-card-icon" });
     setIcon(iconEl, opts.icon);
 
-    const badge = topRow.createSpan({ text: opts.badge });
-    badge.style.cssText = [
-      `color: ${opts.badgeColor}`,
-      "font-size: 0.75em",
-      "font-weight: 600",
-      "padding: 2px 7px",
-      "border-radius: 10px",
-      "background: var(--background-secondary)",
-      "border: 1px solid currentColor",
-      "white-space: nowrap",
-    ].join(";");
+    const badge = topRow.createSpan({
+      text: opts.badge,
+      cls: "ai-hub-card-badge",
+    });
+    badge.setCssProps({ "--ai-badge-color": opts.badgeColor });
 
     card.createDiv({ text: opts.title, cls: "ai-hub-card-title" });
 
     // Список особенностей
-    const ul = card.createEl("ul");
-    ul.style.cssText =
-      "margin:6px 0 8px;padding-left:16px;font-size:0.81em;color:var(--text-muted);line-height:1.5;";
+    const ul = card.createEl("ul", { cls: "ai-hub-card-ul" });
     for (const line of opts.lines) {
       ul.createEl("li", { text: line });
     }
 
     // Метаданные скорость/контекст
-    const meta = card.createDiv();
-    meta.style.cssText =
-      "display:flex;gap:10px;font-size:0.76em;color:var(--text-faint);border-top:1px solid var(--background-modifier-border);padding-top:6px;margin-top:auto;";
+    const meta = card.createDiv({ cls: "ai-hub-card-meta" });
     const sp = meta.createSpan({ text: "⚡ " + opts.speed });
     const ct = meta.createSpan({ text: "📄 " + opts.context });
     void sp;

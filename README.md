@@ -1,135 +1,135 @@
 # Obsidian AI Hub
 
-**AI Hub for Obsidian** — это плагин для Obsidian, который интегрирует возможности больших языковых моделей (LLM) прямо в вашу базу знаний. Поддерживает множество провайдеров (OpenRouter, Ollama, OpenAI, Groq и др.) и предоставляет мощные инструменты для работы с заметками: от генерации текста до глубокого аудита всей базы знаний.
+**AI Hub for Obsidian** is a plugin for Obsidian that integrates the capabilities of Large Language Models (LLM) directly into your knowledge base. It supports many providers (OpenRouter, Ollama, OpenAI, Groq, etc.) and provides powerful tools for working with notes: from text generation to deep auditing of the entire knowledge base.
 
-## Возможности
+## Features
 
-### Основные функции
-- **Генерация текста**: вставка AI-контента в заметки через контекстное меню или горячие клавиши
-- **Работа с выделением**: анализ, расширение, сокращение и переформулирование выделенного текста
-- **Пакетная обработка**: автоматическая обработка нескольких заметок одновременно
-- **Глубокий аудит базы знаний**:
-  - Двухфазный MapReduce-анализ всех заметок
-  - Выявление сиротских заметок
-  - Рекомендации по тегам и связям
-  - Кластеризация по темам
-  - Отчёты в формате Markdown со вставками Dataview и ссылками на заметки
-- **Индексация заметок**: кэширование результатов анализа для быстрого инкрементального аудита — повторно обрабатываются только изменённые заметки
-- **Потоковая передача**: отображение ответов AI в реальном времени
+### Main functions
+- **Text generation**: Inserting AI content into notes via the context menu or keyboard shortcuts
+- **Selection work**: analysis, expansion, reduction and reformulation of the selected text
+- **Batch processing**: automatic processing of multiple notes at the same time
+- **Deep knowledge base audit**:
+- Two-phase MapReduce -analysis of all notes
+- Identification of orphan notes
+- Recommendations on tags and links
+- Clustering by topic
+  - Reports in Markdown format with Dataview inserts and links to notes
+- **Indexing notes**: caching analysis results for fast incremental auditing — only modified notes are re-processed
+- **Streaming**: Displaying AI responses in real time
 
-### Поддерживаемые провайдеры
-- **OpenRouter** — 100+ моделей, включая бесплатные
-- **Ollama** — локальные модели
-- **OpenAI** — GPT-4o, o1, o3-mini и другие
-- **Groq** — быстрые inference-модели
-- **Custom** — любые совместимые API
+### Supported Providers
+- **OpenRouter** — 100+ models, including free ones
+- **Ollama** — local models
+- **OpenAI** — GPT-4o, o1, o3-mini and others
+- **Groq** — fast inference models
+- **Custom** — any compatible API
 
-## Установка
+## Installation
 
-### Вариант 1: Сборка из исходников
+### Option 1: Build from source
 
-1. Клонируйте репозиторий:
+1. Clone the repository:
    ```bash
    git clone <repository-url>
    cd obsidian-ai-hub
    ```
 
-2. Установите зависимости:
-   ```bash
+2. Install the dependencies:
+``bash
    npm install
    ```
 
-3. Соберите плагин:
-   ```bash
+3. Build the plugin:
+``bash
    npm run build
    ```
 
-4. Скопируйте файлы `main.js` и `manifest.json` в папку плагина Obsidian
-   (стили встроены в `main.js`, отдельный css-файл не требуется):
-   ```
-   <ваше-хранилище-Obsidian>/.obsidian/plugins/obsidian-ai-hub/
+4. Copy the files `main.js ` and `manifest.json` to the Obsidian plugin folder
+   (the styles are embedded in the `main.js`, no separate css file required):
+``
+   <your-storage-Obsidian>/.obsidian/plugins/obsidian-ai-hub/
    ```
 
-### Вариант 2: Режим разработки
+### Option 2: Development Mode
 
-Для автоматической пересборки при изменении кода:
-```bash
+For automatic reassembly when changing the code:
+``bash
 npm run dev
 ```
 
-## Приватность
+## Privacy
 
-AI Hub отправляет содержимое заметки (или выделенный фрагмент) на сервер
-того провайдера, которого вы выбрали в настройках — OpenRouter, OpenAI или
-Groq. Эти данные обрабатываются по политике конфиденциальности этого сервиса.
+The AI Hub sends the contents of the note (or a selected fragment) to the server
+of the provider you selected in the settings — OpenRouter, OpenAI or
+Groq. This data is processed according to the privacy policy of this service.
 
-Если вы используете **Ollama**, всё работает локально на вашем компьютере —
-наружу не уходит ничего.
+If you use **Ollama**, everything works locally on your computer —
+nothing goes outside.
 
-API-ключ и индекс заметок хранятся локально в вашем хранилище и никуда
-не передаются.
+The API key and index of notes are stored locally in your storage and
+are not transferred anywhere.
 
-## Настройка
+## Setting up
 
-1. Откройте **Settings → Community plugins → AI Hub**
-2. Выберите провайдера (OpenRouter, Ollama, OpenAI, Groq или Custom)
-3. Введите API-ключ (если требуется)
-4. Укажите модель (например, `google/gemma-2-9b-it:free` для OpenRouter)
-5. Настройте параметры:
-   - **Temperature** (0.0–1.0) — креативность ответов
-   - **Base URL** — адрес API (по умолчанию подставляется для выбранного провайдера)
+1. Open **Settings → Community plugins → AI Hub**
+2. Select a provider (OpenRouter, Ollama, OpenAI, Groq or Custom)
+3. Enter the API key (if required)
+4. Specify the model (for example, `google/gemma-2-9b-it:free` for OpenRouter)
+5. Configure the settings:
+   - **Temperature** (0.0–1.0) — creativity of responses
+   - **Base URL** — API address (by default, it is substituted for the selected provider)
 
-## Использование
+## Usage
 
-### Генерация текста
-1. Откройте любую заметку
-2. Поместите курсор в нужное место или выделите текст
-3. Вызовите AI через контекстное меню (правый клик → **AI Hub**) или палитру команд (`Ctrl/Cmd + P`)
+### Text generation
+1. Open any note
+2. Place the cursor in the desired location or select the text.
+3. Open AI via the context menu (right click → **AI Hub**) or the command palette (`Ctrl/Cmd + P`)
 
-### Глубокий аудит
-1. Запустите команду **«AI Hub: Deep Audit Vault»**
-2. Дождитесь завершения анализа (прогресс отображается в модальном окне)
-3. Получите отчёт с рекомендациями по улучшению базы знаний
+### Deep audit
+1. Run the command **"AI Hub: Deep Audit Vault"**
+2. Wait for the analysis to complete (progress is displayed in the modal window)
+3. Receive a report with recommendations for improving the knowledge base
 
-### Пакетная обработка
-1. Выберите несколько заметок
-2. Запустите пакетную команду
-3. AI обработает все выбранные заметки с учётом настроенных пресетов
+### Batch processing
+1. Select several notes
+2. Run the batch command
+3. AI will process all selected notes based on the preset settings.
 
-## Технические детали
+## Technical Details
 
-### Структура проекта
+### Project structure
 ```
 obsidian-ai-hub/
-├── main.ts           # Основной файл плагина
-├── api.ts            # Работа с API LLM-провайдеров
-├── constants.ts      # Константы и конфигурации провайдеров
-├── settings.ts       # Настройки плагина
-├── deepAudit.ts      # Движок глубокого аудита
-├── noteIndex.ts      # Индексация заметок
-├── style.css         # Стили (зарезервировано; сейчас стили встроены в main.ts)
-├── manifest.json     # Манифест плагина Obsidian
-└── package.json      # Зависимости Node.js
+├── main.ts # The main plugin file
+─── api.ts # Working with LLM providers' API
+├── constants.ts # Constants and Provider Configurations
+├── settings.ts # Plugin Settings
+├── deepAudit.ts # Deep Audit Engine
+├── noteIndex.ts # Indexing notes
+├── style.css # Styles (reserved; styles are currently embedded in main.ts)
+├── manifest.json # Manifest of the Obsidian plugin
+└── package.json # Node dependencies.js
 ```
 
-### Требования
+### Requirements
 - **Obsidian** v1.4.0+
 - **Node.js** v18+
 - **TypeScript** v5.3.3
 
-### Зависимости
-- `esbuild` — быстрая сборка TypeScript
-- `obsidian` — типы и API Obsidian
-- `typescript` — компиляция TS
+### Dependencies
+- 'esbuild' — quick TypeScript build
+- `obsidian' — Obsidian types and APIs
+- `typescript' — compilation of TS
 
-## Лицензия
+## License
 
-MIT — подробнее в файле [LICENSE](LICENSE).
+MIT — for more information, see the [LICENSE](LICENSE) file.
 
-## Вклад в проект
+## Contribution to the project
 
-Принимаются pull request'ы, баг-репорты и предложения по улучшению!
+Pull requests, bug reports, and suggestions for improvement are accepted!
 
 ---
 
-**Сделано с ❤️ для сообщества Obsidian**
+**Made with ❤️ for the Obsidian community**
