@@ -89,18 +89,11 @@ export class AIHubSettingTab extends PluginSettingTab {
     const heroIcon = hero.createDiv({ cls: "ai-hub-hero-icon" });
     setIcon(heroIcon, "brain");
     const heroText = hero.createDiv();
-    heroText
-      .createDiv({ text: "AI Hub" })
-      .setAttribute(
-        "style",
-        "font-size:1.2em;font-weight:700;letter-spacing:-0.02em;",
-      );
-    heroText
-      .createDiv({ text: "Настройки плагина" })
-      .setAttribute(
-        "style",
-        "font-size:0.85em;color:var(--text-muted);margin-top:2px;",
-      );
+    heroText.createDiv({ text: "AI Hub", cls: "ai-hub-hero-title" });
+    heroText.createDiv({
+      text: "Настройки плагина",
+      cls: "ai-hub-hero-sub",
+    });
 
     // ── Секция: провайдер ──────────────────────────────────────────────
     this.addHeading("Языковая модель", "cpu");

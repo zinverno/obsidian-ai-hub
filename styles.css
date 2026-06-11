@@ -1063,6 +1063,8 @@
 .ai-hub-section-label { margin: 0; font-size: 0.95em; font-weight: 600; letter-spacing: -0.01em; }
 .ai-hub-hero { padding: 20px 0 16px; border-bottom: 1px solid var(--background-modifier-border); margin-bottom: 24px; display: flex; align-items: center; gap: 14px; }
 .ai-hub-hero-icon { width: 42px; height: 42px; border-radius: 10px; background: var(--interactive-accent); display: flex; align-items: center; justify-content: center; flex-shrink: 0; color: white; }
+.ai-hub-hero-title { font-size: 1.2em; font-weight: 700; letter-spacing: -0.02em; }
+.ai-hub-hero-sub { font-size: 0.85em; color: var(--text-muted); margin-top: 2px; }
 
 /* — Сетка провайдеров (settings.ts) — */
 .ai-hub-provider-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-bottom: 16px; }
