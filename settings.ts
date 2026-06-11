@@ -1,7 +1,11 @@
-import { App, Notice, PluginSettingTab, Setting, setIcon } from "obsidian";
+import { App, PluginSettingTab, Setting, setIcon } from "obsidian";
 import AIHubPlugin from "./main";
-import { LLMProvider, PROVIDER_PROFILES, ProviderProfile } from "./constants";
-import { testConnection, fetchOllamaModels } from "./api";
+import { LLMProvider, PROVIDER_PROFILES } from "./constants";
+import {
+  testConnection,
+  fetchOllamaModels,
+  fetchOpenRouterFreeModels,
+} from "./api";
 
 export type InsertionType =
   | "end"
@@ -172,7 +176,7 @@ export class AIHubSettingTab extends PluginSettingTab {
         this.renderDynamicSection(save);
       };
 
-      card.addEventListener("click", onClick);
+      card.addEventListener("click", () => void onClick());
       card.addEventListener("keydown", (e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
@@ -321,26 +325,75 @@ export class AIHubSettingTab extends PluginSettingTab {
       });
     this.addIcon(modelSetting, "bot");
 
-    // Популярные модели (если есть)
-    if (profile.popularModels.length > 0) {
-      const pickerRow = el.createDiv({ cls: "ai-hub-chip-row" });
-      for (const m of profile.popularModels) {
-        const chip = pickerRow.createEl("button", { cls: "ai-hub-model-chip" });
-        chip.createSpan({ text: m.label });
-        if (m.tag) {
-          chip.createSpan({ text: m.tag, cls: "ai-hub-model-chip-tag" });
-        }
-        chip.addEventListener("click", async () => {
-          this.plugin.settings.model = m.id;
-          await save();
-          const input = el.querySelector<HTMLInputElement>(
-            "input[aria-label='Название модели']",
-          );
-          if (input) {
-            input.value = m.id;
-          }
-        });
+    // Популярные модели
+    const pickerRow = el.createDiv({ cls: "ai-hub-chip-row" });
+    const addChip = (id: string, label: string, tag?: string) => {
+      const chip = pickerRow.createEl("button", { cls: "ai-hub-model-chip" });
+      chip.createSpan({ text: label });
+      if (tag) {
+        chip.createSpan({ text: tag, cls: "ai-hub-model-chip-tag" });
       }
+      chip.addEventListener("click", () => {
+        this.plugin.settings.model = id;
+        void save();
+        const input = el.querySelector<HTMLInputElement>(
+          "input[aria-label='Название модели']",
+        );
+        if (input) {
+          input.value = id;
+        }
+      });
+    };
+    for (const m of profile.popularModels) {
+      addChip(m.id, m.label, m.tag);
+    }
+
+    // Живой список бесплатных моделей OpenRouter
+    if (provider === "openrouter") {
+      const freeRow = el.createDiv({ cls: "ai-hub-ollama-row" });
+      const freeBtn = freeRow.createEl("button", { cls: "ai-hub-ollama-btn" });
+      setIcon(freeBtn.createSpan(), "refresh-cw");
+      freeBtn.createSpan({ text: " Показать актуальные бесплатные модели" });
+      const freeStatus = freeRow.createDiv({ cls: "ai-hub-ollama-status" });
+
+      freeBtn.addEventListener("click", () => {
+        void (async () => {
+          freeBtn.setAttribute("disabled", "true");
+          freeStatus.setText("Загружаю список с OpenRouter...");
+          try {
+            const models = await fetchOpenRouterFreeModels();
+            if (models.length === 0) {
+              freeStatus.setCssProps({
+                "--ai-status-color": "var(--text-warning,orange)",
+              });
+              freeStatus.setText("⚠ Бесплатные модели не найдены");
+            } else {
+              pickerRow.empty();
+              for (const m of models) {
+                const ctx =
+                  m.context >= 1000
+                    ? `${Math.round(m.context / 1000)}k`
+                    : undefined;
+                addChip(m.id, m.name, ctx);
+              }
+              freeStatus.setCssProps({
+                "--ai-status-color": "var(--color-green,#4caf50)",
+              });
+              freeStatus.setText(
+                `✓ Бесплатных моделей: ${models.length} — кликни чип, чтобы выбрать`,
+              );
+            }
+          } catch (e) {
+            freeStatus.setCssProps({
+              "--ai-status-color": "var(--color-red,#f44336)",
+            });
+            freeStatus.setText(
+              "✗ Ошибка: " + (e instanceof Error ? e.message : String(e)),
+            );
+          }
+          freeBtn.removeAttribute("disabled");
+        })();
+      });
     }
 
     // Загрузить модели Ollama
@@ -355,7 +408,8 @@ export class AIHubSettingTab extends PluginSettingTab {
 
       const ollamaStatus = ollamaRow.createDiv({ cls: "ai-hub-ollama-status" });
 
-      ollamaBtn.addEventListener("click", async () => {
+      ollamaBtn.addEventListener("click", () => {
+        void (async () => {
         ollamaBtn.setAttribute("disabled", "true");
         ollamaStatus.setText("Загрузка...");
         try {
@@ -376,6 +430,7 @@ export class AIHubSettingTab extends PluginSettingTab {
           );
         }
         ollamaBtn.removeAttribute("disabled");
+        })();
       });
     }
 
@@ -427,7 +482,8 @@ export class AIHubSettingTab extends PluginSettingTab {
 
     const testStatus = testRow.createDiv({ cls: "ai-hub-conn-status" });
 
-    testBtn.addEventListener("click", async () => {
+    testBtn.addEventListener("click", () => {
+      void (async () => {
       testBtn.setAttribute("disabled", "true");
       testStatus.setCssProps({ "--ai-status-color": "var(--text-muted)" });
       testStatus.setText("Проверяю...");
@@ -440,6 +496,7 @@ export class AIHubSettingTab extends PluginSettingTab {
         testStatus.setText("✗ " + (e instanceof Error ? e.message : String(e)));
       }
       testBtn.removeAttribute("disabled");
+      })();
     });
   }
 

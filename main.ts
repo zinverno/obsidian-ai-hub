@@ -38,14 +38,13 @@ import {
   DeepAuditEngine,
   DeepAuditProgressModal,
   FinalAuditReport,
-  ClusterSummary,
   DeepAuditConfig,
   DEFAULT_DEEP_AUDIT_CONFIG,
   SingleAuditEngine,
   SingleAuditProgressModal,
   SingleAuditReport,
 } from "./deepAudit";
-import { NoteIndexManager, IndexStats } from "./noteIndex";
+import { NoteIndexManager } from "./noteIndex";
 
 type Mode = "simple" | "selection" | "vault";
 
@@ -71,13 +70,13 @@ export default class AIHubPlugin extends Plugin {
 
       this.addCommand({
         id: "ai-hub-open-panel",
-        name: "AI Hub: Открыть панель управления",
+        name: "Открыть панель управления",
         callback: () => new BatchProcessModal(this.app, this).open(),
       });
 
       this.addCommand({
         id: "ai-deep-vault-audit",
-        name: "AI Hub: Глубокий аудит — выбор режима",
+        name: "Глубокий аудит — выбор режима",
         callback: () => {
           void this.openAuditModeModal();
         },
@@ -119,7 +118,7 @@ export default class AIHubPlugin extends Plugin {
 
       this.addCommand({
         id: "ai-vault-audit",
-        name: "AI Hub: Проанализировать структуру хранилища",
+        name: "Проанализировать структуру хранилища",
         callback: () => {
           void this.runVaultAudit();
         },
@@ -145,12 +144,8 @@ export default class AIHubPlugin extends Plugin {
       new Notice(`❌ Ошибка загрузки AI Hub: ${msg}`);
     }
   }
-  onunload() {
-    const style = document.getElementById("ai-hub-styles");
-    if (style) style.remove();
-  }
   async loadSettings() {
-    const data = await this.loadData();
+    const data = (await this.loadData()) as Partial<AIHubSettings> | null;
     this.settings = Object.assign({}, DEFAULT_SETTINGS, data);
 
     // Миграция: если provider не задан — определяем по baseUrl
@@ -188,8 +183,9 @@ export default class AIHubPlugin extends Plugin {
     // Подтверждение с оценкой стоимости
     const files = this.app.vault.getMarkdownFiles().filter((f) => {
       const p = f.path.toLowerCase();
+      const cfg = this.app.vault.configDir.toLowerCase() + "/";
       return (
-        !p.startsWith(".obsidian/") &&
+        !p.startsWith(cfg) &&
         !p.startsWith("templates/") &&
         !p.startsWith(".ai-backup")
       );
@@ -431,7 +427,7 @@ ${report.actionPlan}
   ) {
     const canvasPath = normalizePath(`Deep-Audit-Map-${dateStr}.canvas`);
 
-    const nodes: any[] = [
+    const nodes: Record<string, unknown>[] = [
       {
         id: "center",
         type: "text",
@@ -444,7 +440,7 @@ ${report.actionPlan}
       },
     ];
 
-    const edges: any[] = [];
+    const edges: Record<string, unknown>[] = [];
     const radius = 700;
     const angleStep = (2 * Math.PI) / Math.max(1, report.clusters.length);
 
@@ -692,8 +688,11 @@ ${report.actionPlan}
 
       try {
         const cursor = editor.getCursor("from");
-        const pos = (editor as any).coordsAtPos(cursor.ch);
-        if (pos && "left" in pos) {
+        const ed = editor as unknown as {
+          coordsAtPos(ch: number): { left: number; top: number } | null;
+        };
+        const pos = ed.coordsAtPos(cursor.ch);
+        if (pos) {
           menu.showAtPosition({ x: pos.left, y: pos.top });
           return;
         }
@@ -701,7 +700,7 @@ ${report.actionPlan}
         /* fallback ниже */
       }
 
-      const rect = document.body.getBoundingClientRect();
+      const rect = activeDocument.body.getBoundingClientRect();
       menu.showAtPosition({ x: rect.width / 2, y: rect.height / 3 });
     });
   }
@@ -777,7 +776,9 @@ ${report.actionPlan}
     menu.addSeparator();
     menu.addItem((item) => {
       const submenu = (
-        item.setTitle("AI Hub").setIcon("sparkles") as any
+        item.setTitle("AI Hub").setIcon("sparkles") as unknown as {
+          setSubmenu(): Menu;
+        }
       ).setSubmenu();
 
       submenu.addItem((sub) =>
@@ -841,8 +842,9 @@ ${report.actionPlan}
 
     const allFiles = this.app.vault.getMarkdownFiles().filter((file) => {
       const path = file.path.toLowerCase();
+      const cfg = this.app.vault.configDir.toLowerCase() + "/";
       return (
-        !path.startsWith(".obsidian/") &&
+        !path.startsWith(cfg) &&
         !path.startsWith("templates/") &&
         !file.basename.startsWith(".")
       );
@@ -879,7 +881,7 @@ ${report.actionPlan}
 
       snapshot += `${file.basename} | ${file.path} | ${tags.join(", ")} | ${totalConnections}\n`;
 
-      if (i % 40 === 0) await new Promise((r) => setTimeout(r, 1));
+      if (i % 40 === 0) await new Promise((r) => window.setTimeout(r, 1));
     }
 
     progressModal.close();
@@ -1068,7 +1070,7 @@ ${folders.map((f) => `> - **${f[0]}**: ${f[1]} файлов`).join("\n")}
   private extractAllTags(cache: CachedMetadata | null): string[] {
     const tags: string[] = cache?.tags?.map((t) => t.tag) ?? [];
     const fm = cache?.frontmatter;
-    const fmTags = fm?.tags ?? fm?.tag;
+    const fmTags: unknown = fm?.tags ?? fm?.tag;
     if (fmTags) {
       const extra = Array.isArray(fmTags)
         ? fmTags
@@ -1140,7 +1142,7 @@ ${folders.map((f) => `> - **${f[0]}**: ${f[1]} файлов`).join("\n")}
       }
     }
 
-    await new Promise((r) => setTimeout(r, 1500));
+    await new Promise((r) => window.setTimeout(r, 1500));
     progress.close();
 
     let report =
@@ -1460,7 +1462,7 @@ class SimplePromptModal extends Modal {
       .onClick(() => this.submit(textarea.value));
 
     // ── Фокус и клавиши ───────────────────────────────────────────
-    setTimeout(() => {
+    window.setTimeout(() => {
       textarea.focus();
       if (this.opts.lastPrompt) textarea.select();
     }, 50);
@@ -1931,8 +1933,9 @@ class AuditModeModal extends Modal {
     await this.index.load();
     this.files = this.app.vault.getMarkdownFiles().filter((f) => {
       const p = f.path.toLowerCase();
+      const cfg = this.app.vault.configDir.toLowerCase() + "/";
       return (
-        !p.startsWith(".obsidian/") &&
+        !p.startsWith(cfg) &&
         !p.startsWith("templates/") &&
         !p.startsWith(".ai-backup")
       );
@@ -1984,7 +1987,6 @@ class AuditModeModal extends Modal {
     const modesGrid = contentEl.createDiv({ cls: "ai-hub-grid" });
 
     // ── BATCH режим ──────────────────────────────────────────────────
-    const batchToProcess = stats.stale + stats.unseen;
     // this.createModeCard(modesGrid, {
     //   icon: "layers",
     //   title: "Batch Аудит",

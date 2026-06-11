@@ -1,3 +1,4 @@
+import { requestUrl } from "obsidian";
 import { AIHubSettings } from "./settings";
 import { PROVIDER_PROFILES } from "./constants";
 import {
@@ -92,7 +93,7 @@ export async function fetchWithTimeout(
   externalSignal?: AbortSignal,
 ): Promise<Response> {
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
 
   const onAbort = () => controller.abort();
   externalSignal?.addEventListener("abort", onAbort);
@@ -100,7 +101,7 @@ export async function fetchWithTimeout(
   try {
     return await fetch(url, { ...options, signal: controller.signal });
   } finally {
-    clearTimeout(timeoutId);
+    window.clearTimeout(timeoutId);
     externalSignal?.removeEventListener("abort", onAbort);
   }
 }
@@ -200,7 +201,7 @@ export async function callOpenRouter(
     throw new Error(`API ${res.status}: ${errorText.slice(0, 200)}`);
   }
 
-  const json: OpenRouterResponse = await res.json();
+  const json = (await res.json()) as OpenRouterResponse;
 
   if (json.error?.message) {
     throw new Error(`API error: ${json.error.message}`);
@@ -269,7 +270,7 @@ export async function streamOpenRouter(
         if (jsonStr === "[DONE]") return;
 
         try {
-          const json: OpenRouterResponse = JSON.parse(jsonStr);
+          const json = JSON.parse(jsonStr) as OpenRouterResponse;
 
           // Проверяем finish_reason
           const finishReason = json.choices?.[0]?.finish_reason;
@@ -368,4 +369,32 @@ export async function fetchOllamaModels(baseUrl: string): Promise<string[]> {
   } catch {
     return [];
   }
+}
+
+// ─────────────────────────────────────────────
+//  Бесплатные модели OpenRouter (публичный эндпоинт, ключ не нужен)
+// ─────────────────────────────────────────────
+export interface FreeModelInfo {
+  id: string;
+  name: string;
+  context: number;
+}
+
+export async function fetchOpenRouterFreeModels(): Promise<FreeModelInfo[]> {
+  const res = await requestUrl({
+    url: "https://openrouter.ai/api/v1/models",
+    method: "GET",
+  });
+  const json = res.json as {
+    data?: Array<{ id: string; name?: string; context_length?: number }>;
+  };
+  return (json.data ?? [])
+    .filter((m) => m.id.endsWith(":free"))
+    .sort((a, b) => (b.context_length ?? 0) - (a.context_length ?? 0))
+    .slice(0, 12)
+    .map((m) => ({
+      id: m.id,
+      name: (m.name ?? m.id).replace(/\s*\(free\)\s*$/i, ""),
+      context: m.context_length ?? 0,
+    }));
 }

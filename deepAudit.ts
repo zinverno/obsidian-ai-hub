@@ -5,10 +5,9 @@ import {
   Modal,
   Setting,
   ButtonComponent,
-  CachedMetadata,
 } from "obsidian";
 import { AIHubSettings } from "./settings";
-import { callOpenRouter, CallOptions } from "./api";
+import { callOpenRouter } from "./api";
 import { NoteIndexManager, NoteRecord } from "./noteIndex";
 import { MAX_TOKENS_BATCH, MAX_TOKENS_AUDIT } from "./constants";
 
@@ -200,7 +199,7 @@ async function withRetry<T>(
       if (signal.aborted) throw new Error("Отменено пользователем");
       if (attempt < retries) {
         const delay = 1000 * Math.pow(2, attempt); // 1s, 2s, 4s
-        await new Promise((r) => setTimeout(r, delay));
+        await new Promise((r) => window.setTimeout(r, delay));
       }
     }
   }
@@ -292,7 +291,7 @@ export class DeepAuditEngine {
     return this.app.vault.getMarkdownFiles().filter((f) => {
       const path = f.path.toLowerCase();
       return (
-        !path.startsWith(".obsidian/") &&
+        !path.startsWith(this.app.vault.configDir.toLowerCase() + "/") &&
         !path.startsWith("templates/") &&
         !path.startsWith(".ai-backup") &&
         !f.basename.startsWith(".")
@@ -369,7 +368,7 @@ export class DeepAuditEngine {
       currentPayload += fileBlock;
 
       // Каждые N файлов уступаем UI-треду
-      if (i % 20 === 0) await new Promise((r) => setTimeout(r, 1));
+      if (i % 20 === 0) await new Promise((r) => window.setTimeout(r, 1));
     }
 
     flush();
@@ -380,7 +379,7 @@ export class DeepAuditEngine {
   private async runMapPhase(
     batches: Array<{ index: number; payload: string; files: TFile[] }>,
   ): Promise<BatchSummary[]> {
-    const results: BatchSummary[] = new Array(batches.length);
+    const results: BatchSummary[] = new Array<BatchSummary>(batches.length);
     let completed = 0;
 
     // Семафор для ограничения параллельности
@@ -421,7 +420,7 @@ export class DeepAuditEngine {
         // Rate limiting
         if (this.config.delayBetweenBatchesMs > 0) {
           await new Promise((r) =>
-            setTimeout(r, this.config.delayBetweenBatchesMs),
+            window.setTimeout(r, this.config.delayBetweenBatchesMs),
           );
         }
       }
@@ -562,7 +561,7 @@ export class DeepAuditEngine {
       partialClusters.push(c);
       if (this.config.delayBetweenBatchesMs > 0) {
         await new Promise((r) =>
-          setTimeout(r, this.config.delayBetweenBatchesMs),
+          window.setTimeout(r, this.config.delayBetweenBatchesMs),
         );
       }
     }
@@ -804,7 +803,7 @@ export class DeepAuditProgressModal extends Modal {
 
   finish() {
     this.cancelBtn?.setDisabled(true).setButtonText("Готово");
-    setTimeout(() => this.close(), 800);
+    window.setTimeout(() => this.close(), 800);
   }
 }
 
@@ -943,7 +942,7 @@ export class SingleAuditEngine {
         this.config.delayMs > 0 &&
         !this.signal.aborted
       ) {
-        await new Promise((r) => setTimeout(r, this.config.delayMs));
+        await new Promise((r) => window.setTimeout(r, this.config.delayMs));
       }
     }
 
@@ -1006,8 +1005,8 @@ export class SingleAuditEngine {
       entities: Array.isArray(parsed.entities)
         ? parsed.entities.slice(0, 15)
         : [],
-      quality: (["draft", "developed", "polished"] as const).includes(
-        parsed.quality as any,
+      quality: (["draft", "developed", "polished"] as readonly string[]).includes(
+        String(parsed.quality),
       )
         ? (parsed.quality as NoteRecord["quality"])
         : "draft",
@@ -1028,7 +1027,7 @@ export class SingleAuditEngine {
     return this.app.vault.getMarkdownFiles().filter((f) => {
       const p = f.path.toLowerCase();
       return (
-        !p.startsWith(".obsidian/") &&
+        !p.startsWith(this.app.vault.configDir.toLowerCase() + "/") &&
         !p.startsWith("templates/") &&
         !p.startsWith(".ai-backup") &&
         !f.basename.startsWith(".")
@@ -1176,6 +1175,6 @@ export class SingleAuditProgressModal extends Modal {
 
   finish(): void {
     this.currentFileEl.setText("✅ Анализ завершён");
-    setTimeout(() => this.close(), 1200);
+    window.setTimeout(() => this.close(), 1200);
   }
 }
