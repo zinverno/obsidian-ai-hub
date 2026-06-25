@@ -1,3 +1,4 @@
+import { t as tr, setLanguage, AIHubLang } from "./i18n";
 import { App, PluginSettingTab, Setting, setIcon } from "obsidian";
 import AIHubPlugin from "./main";
 import { LLMProvider, PROVIDER_PROFILES } from "./constants";
@@ -31,6 +32,7 @@ export interface AIHubSettings {
   // ── Интерфейс ─────────────────────────────────────────────────────
   showContextMenu: boolean;
   notifyOnCopy: boolean;
+  language: AIHubLang;
   // ── Глубокий аудит ────────────────────────────────────────────────
   deepAudit: {
     batchSize: number;
@@ -51,6 +53,7 @@ export const DEFAULT_SETTINGS: AIHubSettings = {
   filenameTemplate: "AI-{{date}}-{{topic}}",
   showContextMenu: true,
   notifyOnCopy: true,
+  language: "auto",
   deepAudit: {
     batchSize: 5,
     maxConcurrent: 3,
@@ -95,12 +98,12 @@ export class AIHubSettingTab extends PluginSettingTab {
     const heroText = hero.createDiv();
     heroText.createDiv({ text: "AI Hub", cls: "ai-hub-hero-title" });
     heroText.createDiv({
-      text: "Настройки плагина",
+      text: tr("Настройки плагина"),
       cls: "ai-hub-hero-sub",
     });
 
     // ── Секция: провайдер ──────────────────────────────────────────────
-    this.addHeading("Языковая модель", "cpu");
+    this.addHeading(tr("Языковая модель"), "cpu");
     this.renderProviderCards(containerEl, save);
 
     // ── Динамическая секция (поля для выбранного провайдера) ───────────
@@ -110,19 +113,40 @@ export class AIHubSettingTab extends PluginSettingTab {
     containerEl.createEl("hr", { cls: "ai-hub-settings-separator" });
 
     // ── Секция: глубокий аудит ─────────────────────────────────────────
-    this.addHeading("Глубокий аудит", "microscope");
+    this.addHeading(tr("Глубокий аудит"), "microscope");
     this.renderDeepAuditSection(save);
 
     containerEl.createEl("hr", { cls: "ai-hub-settings-separator" });
 
     // ── Секция: вставка ────────────────────────────────────────────────
-    this.addHeading("Вставка ответа", "arrow-down-to-line");
+    this.addHeading(tr("Вставка ответа"), "arrow-down-to-line");
     this.renderInsertionSection(save);
 
     containerEl.createEl("hr", { cls: "ai-hub-settings-separator" });
 
     // ── Секция: интерфейс ──────────────────────────────────────────────
-    this.addHeading("Интерфейс", "layout-dashboard");
+    this.addHeading(tr("Интерфейс"), "layout-dashboard");
+
+    new Setting(this.containerEl)
+      .setName(tr(tr("Язык интерфейса / Language")))
+      .setDesc(
+        tr(
+          tr("Auto — как в Obsidian. Имена команд обновятся после перезагрузки плагина."),
+        ),
+      )
+      .addDropdown((d) => {
+        d.addOption("auto", "Auto")
+          .addOption("en", "English")
+          .addOption("ru", "Русский")
+          .setValue(this.plugin.settings.language ?? "auto")
+          .onChange((v) => {
+            this.plugin.settings.language = v as AIHubLang;
+            setLanguage(v as AIHubLang);
+            void save();
+            this.display();
+          });
+      });
+
     this.renderInterfaceSection(save);
   }
 
@@ -153,7 +177,7 @@ export class AIHubSettingTab extends PluginSettingTab {
       const card = grid.createDiv({ cls: "ai-hub-provider-card" });
       card.setAttribute("tabindex", "0");
       card.setAttribute("role", "button");
-      card.setAttribute("aria-label", `Провайдер: ${profile.label}`);
+      card.setAttribute("aria-label", tr("Провайдер: {p}", { p: profile.label }));
       cards.set(p, card);
 
       const iconWrap = card.createDiv({ cls: "ai-hub-provider-icon" });
@@ -161,7 +185,7 @@ export class AIHubSettingTab extends PluginSettingTab {
 
       card.createDiv({ text: profile.label, cls: "ai-hub-provider-name" });
       card.createDiv({
-        text: profile.description,
+        text: tr(profile.description),
         cls: "ai-hub-provider-desc",
       });
 
@@ -202,45 +226,45 @@ export class AIHubSettingTab extends PluginSettingTab {
     const infoTitle = (t: string) =>
       infoCard.createEl("strong", { text: t, cls: "ai-hub-info-title" });
     if (provider === "ollama") {
-      infoTitle("Ollama — локальный inference");
+      infoTitle(tr("Ollama — локальный inference"));
       infoCard.createEl("br");
-      infoCard.appendText("Установи Ollama: ");
+      infoCard.appendText(tr("Установи Ollama: "));
       infoCard.createEl("code", {
         text: "curl -fsSL https://ollama.com/install.sh | sh",
       });
       infoCard.createEl("br");
-      infoCard.appendText("Загрузи модель: ");
+      infoCard.appendText(tr("Загрузи модель: "));
       infoCard.createEl("code", { text: "ollama pull llama3.2" });
     } else if (provider === "openrouter") {
-      infoTitle("OpenRouter — единый шлюз к 100+ моделям");
+      infoTitle(tr("OpenRouter — единый шлюз к 100+ моделям"));
       infoCard.createEl("br");
-      infoCard.appendText("API ключ: ");
+      infoCard.appendText(tr("API ключ: "));
       infoCard.createEl("a", {
         text: "openrouter.ai/keys",
         href: "https://openrouter.ai/keys",
       });
-      infoCard.appendText(" · Бесплатные модели доступны без баланса");
+      infoCard.appendText(tr(" · Бесплатные модели доступны без баланса"));
     } else if (provider === "openai") {
       infoTitle("OpenAI API");
       infoCard.createEl("br");
-      infoCard.appendText("API ключ: ");
+      infoCard.appendText(tr("API ключ: "));
       infoCard.createEl("a", {
         text: "platform.openai.com/api-keys",
         href: "https://platform.openai.com/api-keys",
       });
     } else if (provider === "groq") {
-      infoTitle("Groq — бесплатный быстрый inference");
+      infoTitle(tr("Groq — бесплатный быстрый inference"));
       infoCard.createEl("br");
-      infoCard.appendText("API ключ: ");
+      infoCard.appendText(tr("API ключ: "));
       infoCard.createEl("a", {
         text: "console.groq.com/keys",
         href: "https://console.groq.com/keys",
       });
     } else {
-      infoTitle("Custom OpenAI-совместимый API");
+      infoTitle(tr("Custom OpenAI-совместимый API"));
       infoCard.createEl("br");
       infoCard.appendText(
-        "Укажи Base URL и при необходимости API ключ. Модель — как требует провайдер.",
+        tr("Укажи Base URL и при необходимости API ключ. Модель — как требует провайдер."),
       );
     }
 
@@ -250,8 +274,8 @@ export class AIHubSettingTab extends PluginSettingTab {
         .setName("API Key")
         .setDesc(
           profile.requiresApiKey
-            ? "Хранится локально"
-            : "Если требуется провайдером",
+            ? tr("Хранится локально")
+            : tr("Если требуется провайдером"),
         )
         .addText((t) => {
           t.inputEl.type = "password";
@@ -276,12 +300,12 @@ export class AIHubSettingTab extends PluginSettingTab {
               hint.setCssProps({
                 "--ai-status-color": "var(--color-green,#4caf50)",
               });
-              hint.setText("✓ Формат ключа корректен");
+              hint.setText(tr("✓ Формат ключа корректен"));
             } else {
               hint.setCssProps({
                 "--ai-status-color": "var(--text-warning,orange)",
               });
-              hint.setText("⚠ Формат ключа нестандартный");
+              hint.setText(tr("⚠ Формат ключа нестандартный"));
             }
           };
           updateKeyHint(this.plugin.settings.apiKey);
@@ -291,7 +315,7 @@ export class AIHubSettingTab extends PluginSettingTab {
           let visible = false;
           btn
             .setIcon("eye")
-            .setTooltip("Показать/скрыть")
+            .setTooltip(tr("Показать/скрыть"))
             .onClick(() => {
               const input = el.querySelector<HTMLInputElement>(
                 'input[type="password"],input[type="text"]',
@@ -307,14 +331,14 @@ export class AIHubSettingTab extends PluginSettingTab {
 
     // ── Модель + быстрый выбор ────────────────────────────────────────
     const modelSetting = new Setting(el)
-      .setName("Модель")
+      .setName(tr("Модель"))
       .setDesc(
         provider === "ollama"
-          ? "Имя модели как в `ollama list`"
-          : "ID модели провайдера",
+          ? tr("Имя модели как в `ollama list`")
+          : tr("ID модели провайдера"),
       )
       .addText((t) => {
-        t.inputEl.setAttribute("aria-label", "Название модели");
+        t.inputEl.setAttribute("aria-label", tr("Название модели"));
         t.setPlaceholder(profile.modelPlaceholder)
           .setValue(this.plugin.settings.model)
           .onChange(async (v) => {
@@ -331,13 +355,13 @@ export class AIHubSettingTab extends PluginSettingTab {
       const chip = pickerRow.createEl("button", { cls: "ai-hub-model-chip" });
       chip.createSpan({ text: label });
       if (tag) {
-        chip.createSpan({ text: tag, cls: "ai-hub-model-chip-tag" });
+        chip.createSpan({ text: tr(tag), cls: "ai-hub-model-chip-tag" });
       }
       chip.addEventListener("click", () => {
         this.plugin.settings.model = id;
         void save();
         const input = el.querySelector<HTMLInputElement>(
-          "input[aria-label='Название модели']",
+          `input[aria-label='${tr(tr("Название модели"))}']`,
         );
         if (input) {
           input.value = id;
@@ -359,14 +383,14 @@ export class AIHubSettingTab extends PluginSettingTab {
       freeBtn.addEventListener("click", () => {
         void (async () => {
           freeBtn.setAttribute("disabled", "true");
-          freeStatus.setText("Загружаю список с OpenRouter...");
+          freeStatus.setText(tr("Загружаю список с OpenRouter..."));
           try {
             const models = await fetchOpenRouterFreeModels();
             if (models.length === 0) {
               freeStatus.setCssProps({
                 "--ai-status-color": "var(--text-warning,orange)",
               });
-              freeStatus.setText("⚠ Бесплатные модели не найдены");
+              freeStatus.setText(tr("⚠ Бесплатные модели не найдены"));
             } else {
               pickerRow.empty();
               for (const m of models) {
@@ -380,7 +404,7 @@ export class AIHubSettingTab extends PluginSettingTab {
                 "--ai-status-color": "var(--color-green,#4caf50)",
               });
               freeStatus.setText(
-                `✓ Бесплатных моделей: ${models.length} — кликни чип, чтобы выбрать`,
+                tr("✓ Бесплатных моделей: {n} — кликни чип, чтобы выбрать", { n: models.length }),
               );
             }
           } catch (e) {
@@ -388,7 +412,7 @@ export class AIHubSettingTab extends PluginSettingTab {
               "--ai-status-color": "var(--color-red,#f44336)",
             });
             freeStatus.setText(
-              "✗ Ошибка: " + (e instanceof Error ? e.message : String(e)),
+              tr("✗ Ошибка: ") + (e instanceof Error ? e.message : String(e)),
             );
           }
           freeBtn.removeAttribute("disabled");
@@ -404,29 +428,29 @@ export class AIHubSettingTab extends PluginSettingTab {
       });
       const ollamaIcon = ollamaBtn.createSpan();
       setIcon(ollamaIcon, "refresh-cw");
-      ollamaBtn.createSpan({ text: "Загрузить доступные модели" });
+      ollamaBtn.createSpan({ text: tr("Загрузить доступные модели") });
 
       const ollamaStatus = ollamaRow.createDiv({ cls: "ai-hub-ollama-status" });
 
       ollamaBtn.addEventListener("click", () => {
         void (async () => {
         ollamaBtn.setAttribute("disabled", "true");
-        ollamaStatus.setText("Загрузка...");
+        ollamaStatus.setText(tr("Загрузка..."));
         try {
           const models = await fetchOllamaModels(this.plugin.settings.baseUrl);
           if (models.length === 0) {
             ollamaStatus.setCssProps({ "--ai-status-color": "var(--text-warning,orange)" });
             ollamaStatus.setText(
-              "⚠ Ollama не найден или моделей нет. Запусти: ollama pull llama3.2",
+              tr("⚠ Ollama не найден или моделей нет. Запусти: ollama pull llama3.2"),
             );
           } else {
             ollamaStatus.setCssProps({ "--ai-status-color": "var(--color-green,#4caf50)" });
-            ollamaStatus.setText(`✓ Найдено: ${models.join(", ")}`);
+            ollamaStatus.setText(tr("✓ Найдено: {list}", { list: models.join(", ") }));
           }
         } catch (e) {
           ollamaStatus.setCssProps({ "--ai-status-color": "var(--color-red,#f44336)" });
           ollamaStatus.setText(
-            "✗ Ошибка: " + (e instanceof Error ? e.message : String(e)),
+            tr("✗ Ошибка: ") + (e instanceof Error ? e.message : String(e)),
           );
         }
         ollamaBtn.removeAttribute("disabled");
@@ -439,11 +463,11 @@ export class AIHubSettingTab extends PluginSettingTab {
       .setName("Base URL")
       .setDesc(
         provider === "custom"
-          ? "URL вашего OpenAI-совместимого API"
-          : "Автозаполнен, можно изменить",
+          ? tr("URL вашего OpenAI-совместимого API")
+          : tr("Автозаполнен, можно изменить"),
       )
       .addText((t) => {
-        t.inputEl.setAttribute("aria-label", "Базовый URL API");
+        t.inputEl.setAttribute("aria-label", tr("Базовый URL API"));
         t.setPlaceholder(profile.defaultBaseUrl || "https://your-api/v1")
           .setValue(this.plugin.settings.baseUrl)
           .onChange(async (v) => {
@@ -458,7 +482,7 @@ export class AIHubSettingTab extends PluginSettingTab {
     this.addIcon(
       new Setting(el)
         .setName("Temperature")
-        .setDesc("Креативность ответа: 0.0 = точно, 1.0 = творчески")
+        .setDesc(tr("Креативность ответа: 0.0 = точно, 1.0 = творчески"))
         .addSlider((s) =>
           s
             .setLimits(0, 1, 0.05)
@@ -478,7 +502,7 @@ export class AIHubSettingTab extends PluginSettingTab {
     const testBtn = testRow.createEl("button", { cls: "ai-hub-test-btn" });
     const testIcon = testBtn.createSpan();
     setIcon(testIcon, "plug");
-    testBtn.createSpan({ text: "Проверить соединение" });
+    testBtn.createSpan({ text: tr("Проверить соединение") });
 
     const testStatus = testRow.createDiv({ cls: "ai-hub-conn-status" });
 
@@ -486,7 +510,7 @@ export class AIHubSettingTab extends PluginSettingTab {
       void (async () => {
       testBtn.setAttribute("disabled", "true");
       testStatus.setCssProps({ "--ai-status-color": "var(--text-muted)" });
-      testStatus.setText("Проверяю...");
+      testStatus.setText(tr("Проверяю..."));
       try {
         const result = await testConnection(this.plugin.settings);
         testStatus.setCssProps({ "--ai-status-color": "var(--color-green,#4caf50)" });
@@ -506,9 +530,9 @@ export class AIHubSettingTab extends PluginSettingTab {
 
     this.addIcon(
       new Setting(el)
-        .setName("Файлов в одном запросе")
+        .setName(tr("Файлов в одном запросе"))
         .setDesc(
-          "Рекомендуется 3-7. Больше = быстрее, но риск превышения контекста",
+          tr("Рекомендуется 3-7. Больше = быстрее, но риск превышения контекста"),
         )
         .addSlider((s) =>
           s
@@ -525,8 +549,8 @@ export class AIHubSettingTab extends PluginSettingTab {
 
     this.addIcon(
       new Setting(el)
-        .setName("Параллельных запросов")
-        .setDesc("Для бесплатного тира: 1-2. Платный: до 5-6")
+        .setName(tr("Параллельных запросов"))
+        .setDesc(tr("Для бесплатного тира: 1-2. Платный: до 5-6"))
         .addSlider((s) =>
           s
             .setLimits(1, 6, 1)
@@ -542,8 +566,8 @@ export class AIHubSettingTab extends PluginSettingTab {
 
     this.addIcon(
       new Setting(el)
-        .setName("Задержка между запросами (мс)")
-        .setDesc("Увеличьте при ошибках 429 Rate Limit")
+        .setName(tr("Задержка между запросами (мс)"))
+        .setDesc(tr("Увеличьте при ошибках 429 Rate Limit"))
         .addSlider((s) =>
           s
             .setLimits(0, 5000, 250)
@@ -563,15 +587,15 @@ export class AIHubSettingTab extends PluginSettingTab {
     const el = this.containerEl;
 
     this.addIcon(
-      new Setting(el).setName("Место вставки по умолчанию").addDropdown((d) =>
+      new Setting(el).setName(tr("Место вставки по умолчанию")).addDropdown((d) =>
         d
-          .addOption("end", "В конец заметки")
-          .addOption("beginning", "В начало заметки")
-          .addOption("replace", "Вместо выделения")
-          .addOption("after", "После выделения")
-          .addOption("new", "В новую заметку")
-          .addOption("clipboard", "В буфер обмена")
-          .addOption("cursor", "В позицию курсора")
+          .addOption("end", tr("В конец заметки"))
+          .addOption("beginning", tr("В начало заметки"))
+          .addOption("replace", tr("Вместо выделения"))
+          .addOption("after", tr("После выделения"))
+          .addOption("new", tr("В новую заметку"))
+          .addOption("clipboard", tr("В буфер обмена"))
+          .addOption("cursor", tr("В позицию курсора"))
           .setValue(this.plugin.settings.defaultInsertion)
           .onChange(async (v) => {
             this.plugin.settings.defaultInsertion = v as InsertionType;
@@ -583,10 +607,10 @@ export class AIHubSettingTab extends PluginSettingTab {
 
     this.addIcon(
       new Setting(el)
-        .setName("Папка для новых заметок")
-        .setDesc("Пусто = корень хранилища")
+        .setName(tr("Папка для новых заметок"))
+        .setDesc(tr("Пусто = корень хранилища"))
         .addText((t) => {
-          t.inputEl.setAttribute("aria-label", "Папка для новых заметок");
+          t.inputEl.setAttribute("aria-label", tr("Папка для новых заметок"));
           return t
             .setPlaceholder("AI-Responses")
             .setValue(this.plugin.settings.newNoteFolder)
@@ -600,10 +624,10 @@ export class AIHubSettingTab extends PluginSettingTab {
 
     this.addIcon(
       new Setting(el)
-        .setName("Шаблон имени файла")
+        .setName(tr("Шаблон имени файла"))
         .setDesc("Переменные: {{date}}, {{time}}, {{topic}}")
         .addText((t) => {
-          t.inputEl.setAttribute("aria-label", "Шаблон имени файла");
+          t.inputEl.setAttribute("aria-label", tr("Шаблон имени файла"));
           return t
             .setPlaceholder("AI-{{date}}-{{topic}}")
             .setValue(this.plugin.settings.filenameTemplate)
@@ -622,8 +646,8 @@ export class AIHubSettingTab extends PluginSettingTab {
 
     this.addIcon(
       new Setting(el)
-        .setName("Контекстное меню")
-        .setDesc("Пункт AI Hub при правом клике (требует перезагрузки)")
+        .setName(tr("Контекстное меню"))
+        .setDesc(tr("Пункт AI Hub при правом клике (требует перезагрузки)"))
         .addToggle((t) =>
           t
             .setValue(this.plugin.settings.showContextMenu)
@@ -636,7 +660,7 @@ export class AIHubSettingTab extends PluginSettingTab {
     );
 
     this.addIcon(
-      new Setting(el).setName("Уведомление о копировании").addToggle((t) =>
+      new Setting(el).setName(tr("Уведомление о копировании")).addToggle((t) =>
         t.setValue(this.plugin.settings.notifyOnCopy).onChange(async (v) => {
           this.plugin.settings.notifyOnCopy = v;
           await save();

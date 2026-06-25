@@ -1,3 +1,4 @@
+import { t as tr } from "./i18n";
 import {
   App,
   TFile,
@@ -70,51 +71,11 @@ export interface FinalAuditReport {
 }
 
 // === ПРОМПТЫ ===
-const MAP_SYSTEM_PROMPT = `Ты — аналитик базы знаний. Анализируй каждую заметку кратко и структурировано.
-Отвечай СТРОГО валидным JSON-массивом без Markdown, без комментариев, без текста вокруг.
+const MAP_SYSTEM_PROMPT = () => tr("@map_sys");
 
-Для каждого файла верни объект со структурой:
-{
-  "path": "путь из запроса",
-  "topics": ["тема1", "тема2"],
-  "keyIdeas": "1-2 предложения о главной сути заметки",
-  "entities": ["имя/концепт/технология"],
-  "quality": "draft" | "developed" | "polished",
-  "suggestedTags": ["#тег1", "#тег2"],
-  "suggestedLinks": ["вероятные связанные заметки по смыслу"]
-}
+const REDUCE_CLUSTER_PROMPT = () => tr("@cluster_sys");
 
-Если заметка пустая, содержит только ссылки или является заглушкой — quality: "draft", keyIdeas: "пустая заметка-заглушка", topics: [], entities: [], suggestedTags: [].
-ВАЖНО: Никогда не повторяй фразы. Каждое поле — уникальная информация. Ответ строго JSON.`;
-
-const REDUCE_CLUSTER_PROMPT = `Ты — архитектор знаний Obsidian. На вход получишь сводки заметок (JSON).
-Твоя задача — выявить 3-7 тематических КЛАСТЕРОВ и предложить структуру.
-
-Отвечай СТРОГО валидным JSON без Markdown:
-{
-  "clusters": [
-    {
-      "name": "Название кластера",
-      "description": "О чём этот кластер, 1-2 предложения",
-      "filePaths": ["путь1", "путь2"],
-      "suggestedMOC": "Название предлагаемой MOC-заметки"
-    }
-  ]
-}`;
-
-const FINAL_INSIGHTS_PROMPT = `Ты — эксперт по PKM и Obsidian. На входе — список кластеров заметок пользователя.
-Напиши на русском языке структурированный отчёт в Markdown:
-
-## 🔍 Глобальные инсайты
-3-5 наблюдений о структуре знаний (тематические перекосы, пробелы, сильные стороны).
-
-## 🎯 План действий
-5-7 конкретных шагов реорганизации (нумерованный список). Каждый шаг = одно действие.
-
-## ⚠️ Проблемные зоны
-Что требует внимания (сироты, дубли, черновики).
-
-Будь конкретным, ссылайся на названия кластеров. Не вставляй кода.`;
+const FINAL_INSIGHTS_PROMPT = () => tr("@final_sys");
 
 // === УТИЛИТЫ ===
 
@@ -178,7 +139,7 @@ function extractJSON<T>(raw: string): T {
     ...[cleaned.indexOf("{"), cleaned.indexOf("[")].filter((i) => i >= 0),
   );
   if (!Number.isFinite(jsonStart))
-    throw new Error("JSON не найден в ответе модели");
+    throw new Error(tr("JSON не найден в ответе модели"));
 
   const jsonStr = cleaned.slice(jsonStart);
   return JSON.parse(jsonStr) as T;
@@ -191,12 +152,12 @@ async function withRetry<T>(
 ): Promise<T> {
   let lastErr: unknown;
   for (let attempt = 0; attempt <= retries; attempt++) {
-    if (signal.aborted) throw new Error("Отменено пользователем");
+    if (signal.aborted) throw new Error(tr("Отменено пользователем"));
     try {
       return await fn();
     } catch (err) {
       lastErr = err;
-      if (signal.aborted) throw new Error("Отменено пользователем");
+      if (signal.aborted) throw new Error(tr("Отменено пользователем"));
       if (attempt < retries) {
         const delay = 1000 * Math.pow(2, attempt); // 1s, 2s, 4s
         await new Promise((r) => window.setTimeout(r, delay));
@@ -240,10 +201,10 @@ export class DeepAuditEngine {
     const startTime = Date.now();
 
     // 1. Отбираем файлы
-    this.report("collect", 0, 1, "Сбор файлов...");
+    this.report("collect", 0, 1, tr("Сбор файлов..."));
     const files = this.collectFiles();
     if (files.length === 0) {
-      throw new Error("Нет файлов для анализа");
+      throw new Error(tr("Нет файлов для анализа"));
     }
 
     // 2. Формируем батчи
@@ -263,7 +224,7 @@ export class DeepAuditEngine {
       batches.length * this.config.batchSize - allSummaries.length;
 
     if (allSummaries.length === 0) {
-      throw new Error("Не удалось проанализировать ни одного файла");
+      throw new Error(tr("Не удалось проанализировать ни одного файла"));
     }
 
     // 4. REDUCE-фаза: кластеризация (возможно иерархически)
@@ -321,7 +282,7 @@ export class DeepAuditEngine {
     };
 
     for (let i = 0; i < files.length; i++) {
-      if (this.signal.aborted) throw new Error("Отменено пользователем");
+      if (this.signal.aborted) throw new Error(tr("Отменено пользователем"));
       this.report(
         "reading",
         i + 1,
@@ -414,7 +375,7 @@ export class DeepAuditEngine {
           "mapping",
           completed,
           batches.length,
-          `Обработано батчей: ${completed}/${batches.length}`,
+          tr("Обработано батчей: {a}/{b}", { a: completed, b: batches.length }),
         );
 
         // Rate limiting
@@ -435,7 +396,7 @@ export class DeepAuditEngine {
     }
     await Promise.all(workers);
 
-    if (this.signal.aborted) throw new Error("Отменено пользователем");
+    if (this.signal.aborted) throw new Error(tr("Отменено пользователем"));
 
     return results.filter((r): r is BatchSummary => !!r);
   }
@@ -445,11 +406,11 @@ export class DeepAuditEngine {
     payload: string;
     files: TFile[];
   }): Promise<BatchSummary> {
-    const user = `Проанализируй эти заметки:\n${batch.payload}\n\nВерни JSON-массив по одному объекту на каждый файл (всего ${batch.files.length}).`;
+    const user = tr("@map_user", { payload: batch.payload, n: batch.files.length });
 
     const response = await callOpenRouter(
       this.settings,
-      MAP_SYSTEM_PROMPT,
+      MAP_SYSTEM_PROMPT(),
       user,
       { maxTokens: MAX_TOKENS_BATCH, signal: this.signal },
     );
@@ -457,10 +418,10 @@ export class DeepAuditEngine {
     let parsed: FileSummary[];
     try {
       parsed = extractJSON<FileSummary[]>(response);
-      if (!Array.isArray(parsed)) throw new Error("Ответ не массив");
+      if (!Array.isArray(parsed)) throw new Error(tr("Ответ не массив"));
     } catch (err) {
       throw new Error(
-        `Невалидный JSON от ЛЛМ: ${err instanceof Error ? err.message : err}`,
+        tr("Невалидный JSON от ЛЛМ: {err}", { err: err instanceof Error ? err.message : String(err) }),
       );
     }
 
@@ -533,12 +494,12 @@ export class DeepAuditEngine {
     const asString = JSON.stringify(compact);
 
     if (asString.length < 40000) {
-      this.report("reducing", 1, 1, "Финальная кластеризация...");
+      this.report("reducing", 1, 1, tr("Финальная кластеризация..."));
       return await this.clusterize(compact);
     }
 
     // Иерархическая свёртка: делим на группы, кластеризуем, потом мержим
-    this.report("reducing", 0, 1, "Иерархическая кластеризация...");
+    this.report("reducing", 0, 1, tr("Иерархическая кластеризация..."));
     const groups: (typeof compact)[] = [];
     for (let i = 0; i < compact.length; i += groupSize * 3) {
       groups.push(compact.slice(i, i + groupSize * 3));
@@ -546,12 +507,12 @@ export class DeepAuditEngine {
 
     const partialClusters: ClusterSummary[][] = [];
     for (let i = 0; i < groups.length; i++) {
-      if (this.signal.aborted) throw new Error("Отменено пользователем");
+      if (this.signal.aborted) throw new Error(tr("Отменено пользователем"));
       this.report(
         "reducing",
         i + 1,
         groups.length,
-        `Группа ${i + 1}/${groups.length}`,
+        tr("Группа {a}/{b}", { a: i + 1, b: groups.length }),
       );
       const c = await withRetry(
         () => this.clusterize(groups[i]),
@@ -575,16 +536,16 @@ export class DeepAuditEngine {
       "reducing",
       groups.length,
       groups.length,
-      "Объединение кластеров...",
+      tr("Объединение кластеров..."),
     );
     return await this.mergeClusters(flat);
   }
 
   private async clusterize(data: unknown[]): Promise<ClusterSummary[]> {
-    const user = `Вот сводки заметок:\n${JSON.stringify(data, null, 0)}\n\nВыяви кластеры.`;
+    const user = tr("@cluster_user", { data: JSON.stringify(data, null, 0) });
     const response = await callOpenRouter(
       this.settings,
-      REDUCE_CLUSTER_PROMPT,
+      REDUCE_CLUSTER_PROMPT(),
       user,
       { maxTokens: MAX_TOKENS_AUDIT, signal: this.signal },
     );
@@ -607,10 +568,10 @@ export class DeepAuditEngine {
       description: c.description,
       filePaths: c.filePaths,
     }));
-    const user = `Вот промежуточные кластеры. Объедини семантически близкие и верни 3-7 финальных кластеров:\n${JSON.stringify(compact)}`;
+    const user = tr("@merge_user", { data: JSON.stringify(compact) });
     const response = await callOpenRouter(
       this.settings,
-      REDUCE_CLUSTER_PROMPT,
+      REDUCE_CLUSTER_PROMPT(),
       user,
       { maxTokens: MAX_TOKENS_AUDIT, signal: this.signal },
     );
@@ -627,7 +588,7 @@ export class DeepAuditEngine {
     clusters: ClusterSummary[],
     summaries: FileSummary[],
   ): Promise<{ globalInsights: string; actionPlan: string }> {
-    this.report("synthesizing", 0, 1, "Формирование отчёта...");
+    this.report("synthesizing", 0, 1, tr("Формирование отчёта..."));
 
     const orphanCount = summaries.filter((s) => s.orphan).length;
     const qualityStats = {
@@ -643,21 +604,18 @@ export class DeepAuditEngine {
       suggestedMOC: c.suggestedMOC,
     }));
 
-    const user = `Кластеры базы знаний:
-${JSON.stringify(compactClusters, null, 2)}
-
-Общая статистика:
-- Всего заметок: ${summaries.length}
-- Сирот (без связей): ${orphanCount}
-- Черновиков: ${qualityStats.draft}
-- Проработанных: ${qualityStats.developed}
-- Отполированных: ${qualityStats.polished}
-
-Напиши отчёт.`;
+    const user = tr("@final_user", {
+      clusters: JSON.stringify(compactClusters, null, 2),
+      total: summaries.length,
+      orphans: orphanCount,
+      draft: qualityStats.draft,
+      dev: qualityStats.developed,
+      pol: qualityStats.polished,
+    });
 
     const response = await callOpenRouter(
       this.settings,
-      FINAL_INSIGHTS_PROMPT,
+      FINAL_INSIGHTS_PROMPT(),
       user,
       { maxTokens: 3500, signal: this.signal },
     );
@@ -673,7 +631,7 @@ ${JSON.stringify(compactClusters, null, 2)}
       .join("\n\n")
       .trim();
 
-    this.report("synthesizing", 1, 1, "Готово");
+    this.report("synthesizing", 1, 1, tr("Готово"));
     return { globalInsights, actionPlan: actionPlan || response };
   }
 
@@ -701,7 +659,7 @@ export class DeepAuditProgressModal extends Modal {
 
   constructor(app: App) {
     super(app);
-    this.titleEl.setText("🔬 Глубокий аудит хранилища");
+    this.titleEl.setText(tr("🔬 Глубокий аудит хранилища"));
   }
 
   attachEngine(engine: DeepAuditEngine) {
@@ -715,7 +673,7 @@ export class DeepAuditProgressModal extends Modal {
     const root = this.contentEl.createDiv({ cls: "ai-hub-progress-root" });
 
     this.stageEl = root.createEl("h3", {
-      text: "Подготовка...",
+      text: tr("Подготовка..."),
       cls: "ai-hub-progress-stage",
     });
 
@@ -725,7 +683,7 @@ export class DeepAuditProgressModal extends Modal {
 
     this.detailEl = root.createDiv({
       cls: "ai-hub-progress-text",
-      text: "Инициализация...",
+      text: tr("Инициализация..."),
     });
     this.etaEl = root.createDiv({
       cls: "ai-hub-progress-text ai-hub-progress-eta",
@@ -736,24 +694,24 @@ export class DeepAuditProgressModal extends Modal {
     const btnRow = new Setting(root);
     btnRow.addButton((btn) => {
       this.cancelBtn = btn
-        .setButtonText("Отменить")
+        .setButtonText(tr("Отменить"))
         .setWarning()
         .onClick(() => {
           this.isCancelled = true;
           this.engine?.abort();
-          btn.setDisabled(true).setButtonText("Отмена...");
-          new Notice("⏹ Останавливаем после текущего запроса...");
+          btn.setDisabled(true).setButtonText(tr("Отмена..."));
+          new Notice(tr("⏹ Останавливаем после текущего запроса..."));
         });
     });
   }
 
   private stageLabels: Record<string, string> = {
-    collect: "📥 Сбор файлов",
-    reading: "📖 Чтение содержимого",
-    batched: "📦 Подготовка батчей",
-    mapping: "🗺️ Анализ батчей (Map)",
-    reducing: "🔗 Кластеризация (Reduce)",
-    synthesizing: "✨ Финальный синтез",
+    collect: tr("📥 Сбор файлов"),
+    reading: tr("📖 Чтение содержимого"),
+    batched: tr("📦 Подготовка батчей"),
+    mapping: tr("🗺️ Анализ батчей (Map)"),
+    reducing: tr("🔗 Кластеризация (Reduce)"),
+    synthesizing: tr("✨ Финальный синтез"),
   };
 
   private updateProgress(
@@ -781,10 +739,10 @@ export class DeepAuditProgressModal extends Modal {
       const remaining = Math.max(0, (total - current) * perItem);
       const remSec = Math.round(remaining / 1000);
       this.etaEl.setText(
-        `⏱ Прошло: ${Math.round(elapsed / 1000)}с · Осталось ~${remSec}с`,
+        tr("⏱ Прошло: {a}с · Осталось ~{b}с", { a: Math.round(elapsed / 1000), b: remSec }),
       );
     } else {
-      this.etaEl.setText(`⏱ Прошло: ${Math.round(elapsed / 1000)}с`);
+      this.etaEl.setText(tr("⏱ Прошло: {a}с", { a: Math.round(elapsed / 1000) }));
     }
 
     // Лог только значимых событий
@@ -802,7 +760,7 @@ export class DeepAuditProgressModal extends Modal {
   }
 
   finish() {
-    this.cancelBtn?.setDisabled(true).setButtonText("Готово");
+    this.cancelBtn?.setDisabled(true).setButtonText(tr("Готово"));
     window.setTimeout(() => this.close(), 800);
   }
 }
@@ -970,12 +928,13 @@ export class SingleAuditEngine {
       (targets) => targets[file.path] !== undefined,
     ).length;
 
-    const user = [
-      `Путь: ${file.path}`,
-      `Текущие теги: ${existingTags || "нет"}`,
-      `Исходящие ссылки: ${outLinks} · Входящие: ${inLinks}`,
-      `\nСодержимое:\n${content}`,
-    ].join("\n");
+    const user = tr("@single_user", {
+      path: file.path,
+      tags: existingTags || tr(tr("нет")),
+      out: outLinks,
+      inn: inLinks,
+      content,
+    });
 
     const response = await callOpenRouter(
       this.settings,
@@ -990,7 +949,7 @@ export class SingleAuditEngine {
     } catch {
       // Если JSON не распарсился — минимальная запись
       parsed = {
-        mainIdea: "Не удалось распарсить ответ модели",
+        mainIdea: tr("Не удалось распарсить ответ модели"),
         quality: "draft",
       };
     }
@@ -1052,7 +1011,7 @@ export class SingleAuditProgressModal extends Modal {
 
   constructor(app: App) {
     super(app);
-    this.titleEl.setText("Глубокий аудит — Single");
+    this.titleEl.setText(tr("Глубокий аудит — Single"));
   }
 
   attachEngine(engine: SingleAuditEngine): void {
@@ -1068,7 +1027,7 @@ export class SingleAuditProgressModal extends Modal {
     // Текущий файл
     this.currentFileEl = root.createDiv({
       cls: "ai-hub-progress-text",
-      text: "Инициализация...",
+      text: tr("Инициализация..."),
     });
 
     // Прогресс-бар
@@ -1094,14 +1053,14 @@ export class SingleAuditProgressModal extends Modal {
     const btnRow = root.createDiv({ cls: "ai-hub-progress-btnrow" });
     new Setting(btnRow).addButton((btn) =>
       btn
-        .setButtonText("Остановить")
+        .setButtonText(tr("Остановить"))
         .setIcon("square")
         .setWarning()
         .onClick(() => {
           this.isCancelled = true;
           this.engine?.abort();
-          btn.setDisabled(true).setButtonText("Остановка...");
-          new Notice("⏹ Остановка после текущего файла...");
+          btn.setDisabled(true).setButtonText(tr("Остановка..."));
+          new Notice(tr("⏹ Остановка после текущего файла..."));
         }),
     );
   }
@@ -1141,7 +1100,7 @@ export class SingleAuditProgressModal extends Modal {
 
     this.currentFileEl.setText(
       status === "pending"
-        ? `⏳ Анализирую: ${name}`
+        ? tr("⏳ Анализирую: {name}", { name })
         : `${pct}% — ${current}/${total}`,
     );
 
@@ -1153,7 +1112,7 @@ export class SingleAuditProgressModal extends Modal {
       const rate = elapsed / current;
       const remaining = Math.max(0, (total - current) * rate);
       this.etaEl.setText(
-        `⏱ ${Math.round(elapsed / 1000)}с · осталось ~${Math.round(remaining / 1000)}с`,
+        tr("⏱ {a}с · осталось ~{b}с", { a: Math.round(elapsed / 1000), b: Math.round(remaining / 1000) }),
       );
     }
 
@@ -1174,7 +1133,7 @@ export class SingleAuditProgressModal extends Modal {
   }
 
   finish(): void {
-    this.currentFileEl.setText("✅ Анализ завершён");
+    this.currentFileEl.setText(tr("✅ Анализ завершён"));
     window.setTimeout(() => this.close(), 1200);
   }
 }

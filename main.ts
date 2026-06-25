@@ -1,3 +1,4 @@
+import { t as tr, setLanguage, dateLocale } from "./i18n";
 import {
   Plugin,
   Notice,
@@ -63,20 +64,21 @@ export default class AIHubPlugin extends Plugin {
   async onload() {
     try {
       await this.loadSettings();
+      setLanguage(this.settings.language ?? "auto");
 
-      this.addRibbonIcon("sparkles", "AI Hub: Панель управления", () => {
+      this.addRibbonIcon("sparkles", tr("AI Hub: Панель управления"), () => {
         new BatchProcessModal(this.app, this).open();
       });
 
       this.addCommand({
         id: "ai-hub-open-panel",
-        name: "Открыть панель управления",
+        name: tr("Открыть панель управления"),
         callback: () => new BatchProcessModal(this.app, this).open(),
       });
 
       this.addCommand({
         id: "ai-deep-vault-audit",
-        name: "Глубокий аудит — выбор режима",
+        name: tr("Глубокий аудит — выбор режима"),
         callback: () => {
           void this.openAuditModeModal();
         },
@@ -84,7 +86,7 @@ export default class AIHubPlugin extends Plugin {
 
       this.addCommand({
         id: "ai-simple-append",
-        name: "AI: Простое дополнение",
+        name: tr("AI: Простое дополнение"),
         editorCallback: (e) => {
           void this.runAIStream(e, "simple");
         },
@@ -92,7 +94,7 @@ export default class AIHubPlugin extends Plugin {
 
       this.addCommand({
         id: "ai-vault-append",
-        name: "AI: Умное дополнение (Vault)",
+        name: tr("AI: Умное дополнение (Vault)"),
         editorCallback: (e) => {
           void this.runAIStream(e, "vault");
         },
@@ -100,7 +102,7 @@ export default class AIHubPlugin extends Plugin {
 
       this.addCommand({
         id: "ai-selection",
-        name: "AI: Обработать выделение",
+        name: tr("AI: Обработать выделение"),
         editorCheckCallback: (checking, e) => {
           if (!e.getSelection()?.trim()) return false;
           if (!checking) void this.runAIStream(e, "selection");
@@ -110,7 +112,7 @@ export default class AIHubPlugin extends Plugin {
 
       this.addCommand({
         id: "ai-dataview-generate",
-        name: "AI: Создать Dataview",
+        name: tr("AI: Создать Dataview"),
         editorCallback: (e) => {
           void this.generateDataview(e);
         },
@@ -118,7 +120,7 @@ export default class AIHubPlugin extends Plugin {
 
       this.addCommand({
         id: "ai-vault-audit",
-        name: "Проанализировать структуру хранилища",
+        name: tr("Проанализировать структуру хранилища"),
         callback: () => {
           void this.runVaultAudit();
         },
@@ -126,7 +128,7 @@ export default class AIHubPlugin extends Plugin {
 
       this.addCommand({
         id: "ai-batch-process",
-        name: "AI: Обработать несколько заметок",
+        name: tr("AI: Обработать несколько заметок"),
         callback: () => new BatchProcessModal(this.app, this).open(),
       });
 
@@ -141,7 +143,7 @@ export default class AIHubPlugin extends Plugin {
       this.addSettingTab(new AIHubSettingTab(this.app, this));
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      new Notice(`❌ Ошибка загрузки AI Hub: ${msg}`);
+      new Notice(tr("❌ Ошибка загрузки AI Hub: {msg}", { msg }));
     }
   }
   async loadSettings() {
@@ -232,15 +234,15 @@ export default class AIHubPlugin extends Plugin {
       progressModal.finish();
       await this.saveDeepAuditReport(report);
       new Notice(
-        `✅ Глубокий аудит завершён за ${Math.round(report.durationMs / 1000)}с`,
+        tr("✅ Глубокий аудит завершён за {s}с", { s: Math.round(report.durationMs / 1000) }),
       );
     } catch (err) {
       progressModal.close();
       const msg = err instanceof Error ? err.message : String(err);
-      if (msg.includes("Отменено")) {
-        new Notice("⏹ Аудит отменён");
+      if (msg.includes(tr("Отменено"))) {
+        new Notice(tr("⏹ Аудит отменён"));
       } else {
-        new Notice(`❌ Ошибка аудита: ${msg}`);
+        new Notice(tr("❌ Ошибка аудита: {msg}", { msg }));
       }
     }
   }
@@ -268,21 +270,21 @@ export default class AIHubPlugin extends Plugin {
       progressModal.finish();
 
       const msg = [
-        `✅ Single аудит завершён!`,
-        `Проанализировано: ${report.processedFiles}`,
-        `Пропущено (кэш): ${report.skippedFiles}`,
-        `Ошибок: ${report.failedFiles}`,
-        `Время: ${Math.round(report.durationMs / 1000)}с`,
+        tr(tr("✅ Single аудит завершён!")),
+        tr("Проанализировано: {n}", { n: report.processedFiles }),
+        tr("Пропущено (кэш): {n}", { n: report.skippedFiles }),
+        tr("Ошибок: {n}", { n: report.failedFiles }),
+        tr("Время: {s}с", { s: Math.round(report.durationMs / 1000) }),
       ].join("\n");
 
       new Notice(msg, 8000);
     } catch (err) {
       progressModal.close();
       const msg = err instanceof Error ? err.message : String(err);
-      if (msg.includes("Отменено") || msg.includes("abort")) {
-        new Notice("⏹ Аудит остановлен");
+      if (msg.includes(tr("Отменено")) || msg.includes("abort")) {
+        new Notice(tr("⏹ Аудит остановлен"));
       } else {
-        new Notice(`❌ Ошибка Single аудита: ${msg}`);
+        new Notice(tr("❌ Ошибка Single аудита: {msg}", { msg }));
       }
     }
   }
@@ -294,18 +296,18 @@ export default class AIHubPlugin extends Plugin {
   ): Promise<boolean> {
     return new Promise((resolve) => {
       const modal = new Modal(this.app);
-      modal.titleEl.setText("🔬 Глубокий аудит хранилища");
+      modal.titleEl.setText(tr("🔬 Глубокий аудит хранилища"));
       const c = modal.contentEl;
 
       c.createEl("p", {
-        text: "Эта операция прочитает содержимое каждой заметки и отправит пакетами в ЛЛМ для детального анализа.",
+        text: tr("Эта операция прочитает содержимое каждой заметки и отправит пакетами в ЛЛМ для детального анализа."),
       });
 
       const stats = c.createDiv({ cls: "ai-hub-query-box" });
       const statsData: Array<{ icon: string; label: string; value: string }> = [
-        { icon: "file-text", label: "Файлов", value: String(fileCount) },
-        { icon: "zap", label: "Запросов к API", value: `~${requests}` },
-        { icon: "clock", label: "Примерное время", value: `~${minutes} мин` },
+        { icon: "file-text", label: tr("Файлов"), value: String(fileCount) },
+        { icon: "zap", label: tr("Запросов к API"), value: `~${requests}` },
+        { icon: "clock", label: tr("Примерное время"), value: `~${minutes} мин` },
       ];
       statsData.forEach(({ icon, label, value }) => {
         const row = stats.createDiv({ cls: "ai-hub-cost-row" });
@@ -315,19 +317,19 @@ export default class AIHubPlugin extends Plugin {
         row.createSpan({ text: value, cls: "ai-hub-cost-val" });
       });
       stats.createDiv({
-        text: "Стоимость зависит от вашего провайдера и тарифа",
+        text: tr("Стоимость зависит от вашего провайдера и тарифа"),
         cls: "ai-hub-cost-note",
       });
 
       c.createDiv({
-        text: "На бесплатном тире OpenRouter возможны ошибки rate-limit. Ничего в хранилище не изменяется.",
+        text: tr("На бесплатном тире OpenRouter возможны ошибки rate-limit. Ничего в хранилище не изменяется."),
         cls: "ai-hub-warning",
       });
 
       let done = false;
       const btns = c.createDiv({ cls: "modal-button-container" });
       new ButtonComponent(btns)
-        .setButtonText("Отмена")
+        .setButtonText(tr("Отмена"))
         .setIcon("x")
         .onClick(() => {
           done = true;
@@ -335,7 +337,7 @@ export default class AIHubPlugin extends Plugin {
           modal.close();
         });
       new ButtonComponent(btns)
-        .setButtonText("Начать анализ")
+        .setButtonText(tr("Начать анализ"))
         .setIcon("play")
         .setCta()
         .onClick(() => {
@@ -352,7 +354,7 @@ export default class AIHubPlugin extends Plugin {
 
   private async saveDeepAuditReport(report: FinalAuditReport) {
     const dateStr = new Date()
-      .toLocaleString("ru-RU")
+      .toLocaleString(dateLocale())
       .replace(/[/:]/g, "-")
       .replace(",", "");
     const durationStr = `${Math.round(report.durationMs / 1000)}с`;
@@ -368,49 +370,30 @@ export default class AIHubPlugin extends Plugin {
           .join("\n");
         const more =
           c.filePaths.length > 20
-            ? `\n  - _...и ещё ${c.filePaths.length - 20} файлов_`
+            ? "\n" + tr("  - _...и ещё {n} файлов_", { n: c.filePaths.length - 20 })
             : "";
-        return `### 📚 ${c.name}\n*${c.description}*\n\n**Файлов:** ${c.fileCount} · **Предлагаемая MOC:** \`${c.suggestedMOC}\`\n\n**Файлы:**\n${files}${more}`;
+        return tr("@deep_cluster", {
+          name: c.name,
+          desc: c.description,
+          count: c.fileCount,
+          moc: c.suggestedMOC,
+          files,
+          more,
+        });
       })
       .join("\n\n---\n\n");
 
-    const content = `---
-type: deep-audit-report
-date: ${new Date().toISOString()}
-duration: ${durationStr}
-files_analyzed: ${report.processedFiles}
-files_failed: ${report.failedFiles}
----
-
-# 🔬 Глубокий аудит хранилища
-
-> [!abstract] Сводка
-> - **Проанализировано файлов:** ${report.processedFiles} из ${report.totalFiles}
-> - **Не удалось обработать:** ${report.failedFiles}
-> - **Найдено кластеров:** ${report.clusters.length}
-> - **Время выполнения:** ${durationStr}
-
----
-
-## 🧠 Тематические кластеры
-
-${clustersMd}
-
----
-
-${report.globalInsights}
-
----
-
-${report.actionPlan}
-
----
-
-> [!tip] Что дальше?
-> 1. Создайте MOC-заметки из предложенных выше.
-> 2. Свяжите файлы из кластеров через обратные ссылки.
-> 3. Запустите массовую обработку для добавления тегов из рекомендаций.
-`;
+    const content = tr("@deep_report", {
+      iso: new Date().toISOString(),
+      duration: durationStr,
+      processed: report.processedFiles,
+      failed: report.failedFiles,
+      total: report.totalFiles,
+      nclusters: report.clusters.length,
+      clustersMd,
+      insights: report.globalInsights,
+      actionPlan: report.actionPlan,
+    });
 
     const path = normalizePath(`Deep-Audit-${dateStr}.md`);
     const file = await this.app.vault.create(path, content);
@@ -431,7 +414,11 @@ ${report.actionPlan}
       {
         id: "center",
         type: "text",
-        text: `# 🔬 Deep Audit\n${new Date().toLocaleDateString("ru-RU")}\n\n**${report.processedFiles}** файлов\n**${report.clusters.length}** кластеров`,
+        text: tr("@deep_canvas_center", {
+          date: new Date().toLocaleDateString(dateLocale()),
+          n: report.processedFiles,
+          c: report.clusters.length,
+        }),
         x: 0,
         y: 0,
         width: 400,
@@ -490,7 +477,7 @@ ${report.actionPlan}
       mode === "selection" ? editor.getSelection()?.slice(0, 200) : undefined;
     const prompt = await promptUser(
       this.app,
-      mode === "vault" ? "Запрос для поиска:" : "Что добавить/изменить?",
+      mode === "vault" ? tr("Запрос для поиска:") : tr("Что добавить/изменить?"),
       {
         mode,
         selectionPreview: selPreview,
@@ -504,7 +491,7 @@ ${report.actionPlan}
     const target = await this.awaitInsertionMenu(editor, mode);
     if (!target) return;
 
-    const loadingNotice = notify("loading", "AI думает и пишет...");
+    const loadingNotice = notify("loading", tr("AI думает и пишет..."));
 
     try {
       const { system, user } = this.buildPrompts(editor, mode, prompt);
@@ -513,14 +500,14 @@ ${report.actionPlan}
         const fullRes = await callOpenRouter(this.settings, system, user);
         await navigator.clipboard.writeText(fullRes);
         loadingNotice.hide();
-        notify("success", "Скопировано в буфер");
+        notify("success", tr("Скопировано в буфер"));
         return;
       }
 
       if (target === "new") {
         await this.streamToNewNote(system, user, prompt);
         loadingNotice.hide();
-        notify("success", "Новая заметка создана");
+        notify("success", tr("Новая заметка создана"));
         return;
       }
 
@@ -528,7 +515,7 @@ ${report.actionPlan}
       await this.streamIntoEditor(editor, target, system, user);
 
       loadingNotice.hide();
-      notify("success", "Готово");
+      notify("success", tr("Готово"));
     } catch (err) {
       loadingNotice.hide();
       const msg = err instanceof Error ? err.message : String(err);
@@ -546,7 +533,7 @@ ${report.actionPlan}
     if (mode === "selection" && sel?.trim()) {
       return {
         system:
-          "Ты — редактор. Обработай текст по инструкции. Верни ТОЛЬКО результат без пояснений. Не повторяй фразы. Остановись когда задача выполнена.",
+          tr("Ты — редактор. Обработай текст по инструкции. Верни ТОЛЬКО результат без пояснений. Не повторяй фразы. Остановись когда задача выполнена."),
         user: `Текст:\n${sel}\n\nИнструкция: ${prompt}`,
       };
     }
@@ -560,10 +547,10 @@ ${report.actionPlan}
 
     return {
       system:
-        "Ты — ассистент для заметок Obsidian. " +
-        "Дополни заметку согласно задаче. " +
-        "НИКОГДА не повторяй уже написанный текст. " +
-        "Остановись когда задача выполнена, не продолжай бесконечно.",
+        tr("Ты — ассистент для заметок Obsidian. ") +
+        tr("Дополни заметку согласно задаче. ") +
+        tr("НИКОГДА не повторяй уже написанный текст. ") +
+        tr("Остановись когда задача выполнена, не продолжай бесконечно."),
       user: `Заметка:\n${fullText}\n\nЗадача: ${prompt}`,
     };
   }
@@ -600,7 +587,7 @@ ${report.actionPlan}
 
     const newEditor = this.app.workspace.activeEditor?.editor;
     if (!newEditor)
-      throw new Error("Не удалось получить редактор новой заметки");
+      throw new Error(tr("Не удалось получить редактор новой заметки"));
 
     let line = 0;
     let ch = 0;
@@ -739,14 +726,14 @@ ${report.actionPlan}
       return;
     }
 
-    const p = await promptUser(this.app, "Что показать?");
+    const p = await promptUser(this.app, tr("Что показать?"));
     if (!p) return;
 
-    const notice = notify("loading", "Генерирую Dataview...");
+    const notice = notify("loading", tr("Генерирую Dataview..."));
     try {
       const r = await callOpenRouter(
         this.settings,
-        "Только код dataview. Начинай с TABLE/LIST/TASK/CALENDAR. Без markdown-обёртки.",
+        tr("Только код dataview. Начинай с TABLE/LIST/TASK/CALENDAR. Без markdown-обёртки."),
         `Запрос: ${p}`,
         { maxTokens: MAX_TOKENS_DATAVIEW },
       );
@@ -757,11 +744,11 @@ ${report.actionPlan}
         .replace(/^dataview\s*/i, "");
 
       if (!/^(TABLE|LIST|TASK|CALENDAR|FROM)/i.test(cleaned)) {
-        throw new Error("Некорректный ответ AI");
+        throw new Error(tr("Некорректный ответ AI"));
       }
       editor.replaceSelection(`\n\`\`\`dataview\n${cleaned}\n\`\`\`\n`);
       notice.hide();
-      notify("success", "Dataview создан");
+      notify("success", tr("Dataview создан"));
     } catch (err) {
       notice.hide();
       const msg = err instanceof Error ? err.message : String(err);
@@ -783,25 +770,25 @@ ${report.actionPlan}
 
       submenu.addItem((sub) =>
         sub
-          .setTitle("Улучшить стиль")
+          .setTitle(tr("Улучшить стиль"))
           .setIcon("sparkles")
-          .onClick(() => this.quickAction(editor, sel, "Улучши стиль")),
+          .onClick(() => this.quickAction(editor, sel, tr("Улучши стиль"))),
       );
       submenu.addItem((sub) =>
         sub
-          .setTitle("Сократить")
+          .setTitle(tr("Сократить"))
           .setIcon("minimize-2")
-          .onClick(() => this.quickAction(editor, sel, "Сократи")),
+          .onClick(() => this.quickAction(editor, sel, tr("Сократи"))),
       );
       submenu.addItem((sub) =>
         sub
-          .setTitle("Перефразировать")
+          .setTitle(tr("Перефразировать"))
           .setIcon("refresh-cw")
-          .onClick(() => this.quickAction(editor, sel, "Перефразируй")),
+          .onClick(() => this.quickAction(editor, sel, tr("Перефразируй"))),
       );
       submenu.addItem((sub) =>
         sub
-          .setTitle("Создать Dataview")
+          .setTitle(tr("Создать Dataview"))
           .setIcon("table")
           .onClick(() => this.generateDataview(editor)),
       );
@@ -810,14 +797,14 @@ ${report.actionPlan}
 
   async quickAction(editor: Editor, sel: string, action: string) {
     if (!sel.trim()) {
-      new Notice("Сначала выделите текст");
+      new Notice(tr("Сначала выделите текст"));
       return;
     }
-    const notice = new Notice("🤖 Думаю...", 0);
+    const notice = new Notice(tr("🤖 Думаю..."), 0);
     try {
       const r = await callOpenRouter(
         this.settings,
-        "Верни только результат, без пояснений.",
+        tr("Верни только результат, без пояснений."),
         `Текст:\n${sel}\n\nИнструкция: ${action}`,
         { maxTokens: MAX_TOKENS_BATCH },
       );
@@ -827,7 +814,7 @@ ${report.actionPlan}
         .trim();
       editor.replaceSelection(cleaned);
       notice.hide();
-      new Notice("✅ Готово");
+      new Notice(tr("✅ Готово"));
     } catch (err) {
       notice.hide();
       const msg = err instanceof Error ? err.message : String(err);
@@ -837,7 +824,7 @@ ${report.actionPlan}
 
   // === Аудит хранилища ===
   async runVaultAudit() {
-    const progressModal = new ProgressModal(this.app, "Анализ хранилища");
+    const progressModal = new ProgressModal(this.app, tr("Анализ хранилища"));
     progressModal.open();
 
     const allFiles = this.app.vault.getMarkdownFiles().filter((file) => {
@@ -887,7 +874,7 @@ ${report.actionPlan}
     progressModal.close();
 
     if (snapshot.length > VAULT_SNAPSHOT_MAX_CHARS) {
-      new Notice("Хранилище большое — данные для API обрезаны.");
+      new Notice(tr("Хранилище большое — данные для API обрезаны."));
       snapshot =
         snapshot.slice(0, VAULT_SNAPSHOT_MAX_CHARS) + "\n... [обрезано]";
     }
@@ -900,22 +887,16 @@ ${report.actionPlan}
       .sort((a, b) => b[1] - a[1])
       .slice(0, 20);
 
-    const auditPrompt = `Проанализируй структуру Obsidian-хранилища.
-
-ОБЩАЯ СТАТИСТИКА:
-- Заметок: ${stats.total}
-- С тегами: ${stats.withTags}
-- Без связей: ${stats.orphaned}
-- Состояние: ${isChaos ? "ХАОС (нужна первичная структура)" : "ЕСТЬ СТРУКТУРА (нужна оптимизация)"}
-
-СПИСОК ФАЙЛОВ (Формат: Имя | Путь | Теги | Связи):
-${snapshot}
-
-ЗАДАЧА:
-1. Выяви 3-5 тематических кластеров.
-2. Дай 5 конкретных шагов реорганизации.
-3. Предложи 3-5 названий MOC-заметок.
-Отвечай кратко и структурно на русском.`;
+    const stateStr = isChaos
+      ? tr(tr("ХАОС (нужна первичная структура)"))
+      : tr(tr("ЕСТЬ СТРУКТУРА (нужна оптимизация)"));
+    const auditPrompt = tr("@audit_prompt", {
+      total: stats.total,
+      withTags: stats.withTags,
+      orphans: stats.orphaned,
+      state: stateStr,
+      snapshot,
+    });
 
     await this.generateFinalReport(auditPrompt, stats, topFolders, topTags);
   }
@@ -926,52 +907,37 @@ ${snapshot}
     folders: Array<[string, number]>,
     tags: Array<[string, number]>,
   ) {
-    const notice = new Notice("ИИ формирует дашборд...", 0);
+    const notice = new Notice(tr("ИИ формирует дашборд..."), 0);
     try {
       const aiAdvice = await callOpenRouter(
         { ...this.settings, temperature: 0.3 },
-        "Ты эксперт по визуализации знаний в Obsidian.",
+        tr("Ты эксперт по визуализации знаний в Obsidian."),
         prompt,
         { maxTokens: MAX_TOKENS_AUDIT },
       );
 
-      const dateStr = new Date().toLocaleString("ru-RU").replace(/[/:]/g, "-");
+      const dateStr = new Date().toLocaleString(dateLocale()).replace(/[/:]/g, "-");
       const connectivity =
         stats.total > 0
           ? Math.round(((stats.total - stats.orphaned) / stats.total) * 100)
           : 0;
 
-      const report = `---
-type: audit-dashboard
-date: ${new Date().toISOString()}
----
-# 🚀 Дашборд аудита хранилища
-
-> [!abstract] Краткая сводка
-> - **Всего файлов:** ${stats.total}
-> - **Связанность:** ${connectivity}%
-> - **Статус:** ${stats.orphaned > stats.total * 0.3 ? "⚠️ Требуется структуризация" : "✅ В порядке"}
-
----
-
-## 🤖 Рекомендации ИИ
-${aiAdvice}
-
----
-
-## 📂 Архитектура (Топ папок)
-> [!info] Распределение
-${folders.map((f) => `> - **${f[0]}**: ${f[1]} файлов`).join("\n")}
-
-## 🏷️ Облако тегов
-> [!quote] Основные ветви
-> ${tags.map((t) => `#${t[0].replace("#", "")}`).join(" ")}
-
----
-## 🔗 Изолированные заметки
-> [!warning] Найдено сирот: ${stats.orphaned}
-> Рекомендуется связать их с MOC.
-`;
+      const statusStr =
+        stats.orphaned > stats.total * 0.3
+          ? tr(tr("⚠️ Требуется структуризация"))
+          : tr(tr("✅ В порядке"));
+      const report = tr("@dash_report", {
+        iso: new Date().toISOString(),
+        total: stats.total,
+        conn: connectivity,
+        status: statusStr,
+        advice: aiAdvice,
+        folders: folders
+          .map((f) => tr("@folder_line", { name: f[0], n: f[1] }))
+          .join("\n"),
+        tags: tags.map((x) => `#${x[0].replace("#", "")}`).join(" "),
+        orphans: stats.orphaned,
+      });
 
       const reportFile = await this.app.vault.create(
         normalizePath(`Audit-Dashboard-${dateStr}.md`),
@@ -981,11 +947,11 @@ ${folders.map((f) => `> - **${f[0]}**: ${f[1]} файлов`).join("\n")}
       await this.app.workspace.getLeaf().openFile(reportFile);
 
       notice.hide();
-      new Notice("✅ Дашборд и Canvas созданы");
+      new Notice(tr("✅ Дашборд и Canvas созданы"));
     } catch (err) {
       notice.hide();
       const msg = err instanceof Error ? err.message : String(err);
-      new Notice(`❌ Ошибка создания дашборда: ${msg}`);
+      new Notice(tr("❌ Ошибка создания дашборда: {msg}", { msg }));
     }
   }
 
@@ -1011,7 +977,7 @@ ${folders.map((f) => `> - **${f[0]}**: ${f[1]} файлов`).join("\n")}
         {
           id: "stats",
           type: "text",
-          text: `## 📈 Статистика\n- Файлов: ${stats.total}\n- Сирот: ${stats.orphaned}`,
+          text: tr("@canvas_stats", { total: stats.total, orphans: stats.orphaned }),
           x: -450,
           y: -100,
           width: 300,
@@ -1020,7 +986,7 @@ ${folders.map((f) => `> - **${f[0]}**: ${f[1]} файлов`).join("\n")}
         {
           id: "advice",
           type: "text",
-          text: `## 💡 Советы ИИ\n${aiAdvice.slice(0, 1000)}${aiAdvice.length > 1000 ? "..." : ""}`,
+          text: tr("@canvas_advice", { advice: aiAdvice.slice(0, 1000) + (aiAdvice.length > 1000 ? "..." : "") }),
           x: 0,
           y: 250,
           width: 850,
@@ -1029,7 +995,7 @@ ${folders.map((f) => `> - **${f[0]}**: ${f[1]} файлов`).join("\n")}
         {
           id: "folders",
           type: "text",
-          text: `## 📂 Структура папок\n${folders.map((f) => `- ${f[0]}`).join("\n")}`,
+          text: tr("@canvas_folders", { folders: folders.map((f) => `- ${f[0]}`).join("\n") }),
           x: 450,
           y: -100,
           width: 300,
@@ -1118,7 +1084,7 @@ ${folders.map((f) => `> - **${f[0]}**: ${f[1]} файлов`).join("\n")}
 
         const newContent = await callOpenRouter(
           this.settings,
-          "Ты — редактор. Верни ТОЛЬКО изменённый текст, без пояснений.",
+          tr("Ты — редактор. Верни ТОЛЬКО изменённый текст, без пояснений."),
           `Текст заметки:\n${content}\n\nИнструкция: ${query}\n\nВерни полный изменённый текст.`,
         );
 
@@ -1145,17 +1111,18 @@ ${folders.map((f) => `> - **${f[0]}**: ${f[1]} файлов`).join("\n")}
     await new Promise((r) => window.setTimeout(r, 1500));
     progress.close();
 
-    let report =
-      `# AI Batch Report\n\n` +
-      `📊 **Результат**\n` +
-      `- Успешно: ${processed}\n` +
-      `- Ошибок: ${errorCount}\n` +
-      `- Backup: \`${backupFolder}/\`\n`;
+    let report = tr("@batch_report", {
+      ok: processed,
+      err: errorCount,
+      backup: backupFolder,
+    });
     if (errors.length) {
-      report += `\n## ⚠️ Ошибки\n${errors
-        .slice(0, 20)
-        .map((e) => `- ${e}`)
-        .join("\n")}\n`;
+      report += tr("@batch_errors", {
+        list: errors
+          .slice(0, 20)
+          .map((e) => `- ${e}`)
+          .join("\n"),
+      });
     }
 
     const reportPath = normalizePath(
@@ -1172,7 +1139,7 @@ ${folders.map((f) => `> - **${f[0]}**: ${f[1]} файлов`).join("\n")}
       );
     await this.app.workspace.getLeaf().openFile(reportFile);
 
-    new Notice(`✅ Готово! Успешно: ${processed}, ошибок: ${errorCount}`);
+    new Notice(tr("✅ Готово! Успешно: {ok}, ошибок: {err}", { ok: processed, err: errorCount }));
   }
 }
 
@@ -1194,12 +1161,12 @@ class ProgressModal extends Modal {
     this.spinner = statusRow.createSpan({ cls: "ai-hub-spinner" });
     this.text = statusRow.createDiv({
       cls: "ai-hub-progress-text",
-      text: "Сбор данных...",
+      text: tr("Сбор данных..."),
     });
     this.text.addClass("ai-hub-status-text");
 
     this.bar = root.createEl("progress", { cls: "ai-hub-progress-bar" });
-    this.bar.setAttribute("aria-label", "Прогресс операции");
+    this.bar.setAttribute("aria-label", tr("Прогресс операции"));
     this.bar.max = 100;
     this.bar.value = 0;
   }
@@ -1209,7 +1176,7 @@ class ProgressModal extends Modal {
     const percent = Math.round((current / total) * 100);
     this.bar.value = percent;
     this.bar.setAttribute("aria-valuenow", String(percent));
-    this.text.setText(`Обработано: ${current} / ${total} — ${percent}%`);
+    this.text.setText(tr("Обработано: {cur} / {total} — {pct}%", { cur: current, total, pct: percent }));
     if (percent >= 100) this.spinner.addClass("ai-hub-hidden");
   }
 }
@@ -1225,7 +1192,7 @@ class BatchProgressModal extends Modal {
   constructor(app: App, total: number) {
     super(app);
     this.total = total;
-    this.titleEl.setText("Пакетная обработка");
+    this.titleEl.setText(tr("Пакетная обработка"));
   }
 
   onOpen() {
@@ -1240,25 +1207,25 @@ class BatchProgressModal extends Modal {
     this.text.addClass("ai-hub-status-text");
 
     this.bar = root.createEl("progress", { cls: "ai-hub-progress-bar" });
-    this.bar.setAttribute("aria-label", "Прогресс обработки заметок");
+    this.bar.setAttribute("aria-label", tr("Прогресс обработки заметок"));
     this.bar.max = this.total;
     this.bar.value = 0;
 
     this.log = root.createDiv({ cls: "ai-hub-progress-log" });
     this.log.setAttribute("role", "log");
     this.log.setAttribute("aria-live", "polite");
-    this.log.setAttribute("aria-label", "Журнал обработки");
+    this.log.setAttribute("aria-label", tr("Журнал обработки"));
 
     const btnRow = root.createDiv({ cls: "ai-hub-progress-btnrow" });
     new Setting(btnRow).addButton((btn) =>
       btn
-        .setButtonText("Остановить")
+        .setButtonText(tr("Остановить"))
         .setIcon("square")
         .setWarning()
         .onClick(() => {
           this.isCancelled = true;
           this.spinner.addClass("ai-hub-hidden");
-          new Notice("⏹ Остановка после текущей заметки...");
+          new Notice(tr("⏹ Остановка после текущей заметки..."));
         }),
     );
   }
@@ -1366,13 +1333,13 @@ class SimplePromptModal extends Modal {
 
     const titleDiv = header.createDiv({ cls: "ai-hub-prompt-title" });
     const iconSpan = titleDiv.createSpan({ cls: "ai-hub-accent-icon" });
-    let titleText = "AI Запрос";
+    let titleText = tr("AI Запрос");
     let iconName = "sparkles";
     if (this.opts.mode === "selection") {
-      titleText = "Обработать выделение";
+      titleText = tr("Обработать выделение");
       iconName = "text-cursor";
     } else if (this.opts.mode === "vault") {
-      titleText = "Запрос по хранилищу";
+      titleText = tr("Запрос по хранилищу");
       iconName = "database";
     }
     setIcon(iconSpan, iconName);
@@ -1399,13 +1366,13 @@ class SimplePromptModal extends Modal {
     const chipsData =
       this.opts.mode === "selection"
         ? [
-          "Улучши стиль",
-          "Сократи",
-          "Объясни",
-          "Переведи на EN",
-          "Исправь ошибки",
+          tr("Улучши стиль"),
+          tr("Сократи"),
+          tr("Объясни"),
+          tr("Переведи на EN"),
+          tr("Исправь ошибки"),
         ]
-        : ["Добавь резюме", "Дополни идеи", "Структурируй", "Добавь теги"];
+        : [tr("Добавь резюме"), tr("Дополни идеи"), tr("Структурируй"), tr("Добавь теги")];
 
     const chipsRow = contentEl.createDiv({ cls: "ai-hub-chips" });
     for (const action of chipsData) {
@@ -1424,7 +1391,7 @@ class SimplePromptModal extends Modal {
         placeholder: this.placeholder,
         rows: "4",
         maxlength: String(this.maxLength),
-        "aria-label": "Введите запрос к AI",
+        "aria-label": tr("Введите запрос к AI"),
         "aria-multiline": "true",
       },
     });
@@ -1446,17 +1413,17 @@ class SimplePromptModal extends Modal {
     const footer = contentEl.createDiv({ cls: "ai-hub-prompt-footer" });
 
     const hint = footer.createSpan({ cls: "ai-hub-hint" });
-    hint.setText("⌘/Ctrl+Enter — отправить · Esc — отмена");
+    hint.setText(tr("⌘/Ctrl+Enter — отправить · Esc — отмена"));
 
     const btnGroup = footer.createDiv({ cls: "ai-hub-btn-group" });
 
     new ButtonComponent(btnGroup)
-      .setButtonText("Отмена")
+      .setButtonText(tr("Отмена"))
       .onClick(() => this.submit(null));
 
     new ButtonComponent(btnGroup)
       .setIcon("send")
-      .setButtonText("Отправить")
+      .setButtonText(tr("Отправить"))
       .setTooltip("Ctrl+Enter")
       .setCta()
       .onClick(() => this.submit(textarea.value));
@@ -1535,23 +1502,23 @@ export class BatchProcessModal extends Modal {
     const titleRow = h2.createDiv({ cls: "ai-hub-title-row" });
     const iconSpan = titleRow.createSpan({ cls: "ai-hub-accent-icon" });
     setIcon(iconSpan, "package");
-    titleRow.createSpan({ text: "Массовая обработка" });
+    titleRow.createSpan({ text: tr("Массовая обработка") });
 
     // Живой счётчик прямо в шапке
     this.countElement = h2.createSpan({
       cls: "ai-hub-count-live empty",
-      text: "0 заметок",
+      text: tr("0 заметок"),
     });
 
     header.createEl("p", {
-      text: "Шаг 1: настрой фильтры · Шаг 2: выбери действие",
+      text: tr("Шаг 1: настрой фильтры · Шаг 2: выбери действие"),
     });
   }
 
   private renderFilters(container: HTMLElement) {
     // Шаг 1 лейбл
     const stepLabel = container.createDiv({ cls: "ai-hub-step-label" });
-    stepLabel.createSpan({ text: "Шаг 1 — Фильтры" });
+    stepLabel.createSpan({ text: tr("Шаг 1 — Фильтры") });
 
     const filtersDiv = container.createDiv({ cls: "ai-hub-filters" });
 
@@ -1564,8 +1531,8 @@ export class BatchProcessModal extends Modal {
       return s;
     };
 
-    addIconedSetting("Папка", "folder").addDropdown((dropdown) => {
-      dropdown.addOption("", "Все папки");
+    addIconedSetting(tr("Папка"), "folder").addDropdown((dropdown) => {
+      dropdown.addOption("", tr("Все папки"));
       for (const folder of this.collectFolders()) {
         dropdown.addOption(folder, folder);
       }
@@ -1576,8 +1543,8 @@ export class BatchProcessModal extends Modal {
       });
     });
 
-    addIconedSetting("Теги", "tag").addText((text) => {
-      text.inputEl.setAttribute("aria-label", "Теги через запятую");
+    addIconedSetting(tr("Теги"), "tag").addText((text) => {
+      text.inputEl.setAttribute("aria-label", tr("Теги через запятую"));
       text
         .setPlaceholder("tag1, tag2")
         .setValue(this.filterTags)
@@ -1587,7 +1554,7 @@ export class BatchProcessModal extends Modal {
         });
     });
 
-    addIconedSetting("С", "calendar").addText((text) => {
+    addIconedSetting(tr("С"), "calendar").addText((text) => {
       text.inputEl.type = "date";
       text.setValue(this.filterDateFrom).onChange((v) => {
         this.filterDateFrom = v;
@@ -1595,7 +1562,7 @@ export class BatchProcessModal extends Modal {
       });
     });
 
-    addIconedSetting("По", "calendar").addText((text) => {
+    addIconedSetting(tr("По"), "calendar").addText((text) => {
       text.inputEl.type = "date";
       text.setValue(this.filterDateTo).onChange((v) => {
         this.filterDateTo = v;
@@ -1613,7 +1580,7 @@ export class BatchProcessModal extends Modal {
       cls: "ai-hub-preview-icon",
     });
     setIcon(this.previewToggleIconEl, "chevron-right");
-    toggle.createSpan({ text: "Показать файлы" });
+    toggle.createSpan({ text: tr("Показать файлы") });
 
     this.previewListEl = previewWrap.createDiv({ cls: "ai-hub-preview-list" });
     this.previewListEl.addClass("ai-hub-hidden");
@@ -1655,7 +1622,7 @@ export class BatchProcessModal extends Modal {
     if (files.length === 0) {
       this.previewListEl.createDiv({
         cls: "ai-hub-preview-more",
-        text: "Нет файлов, подходящих под фильтры",
+        text: tr("Нет файлов, подходящих под фильтры"),
       });
     }
   }
@@ -1676,7 +1643,7 @@ export class BatchProcessModal extends Modal {
 
   private renderPresets(container: HTMLElement) {
     const stepLabel = container.createDiv({ cls: "ai-hub-step-label" });
-    stepLabel.createSpan({ text: "Шаг 2 — Выберите действие" });
+    stepLabel.createSpan({ text: tr("Шаг 2 — Выберите действие") });
     const grid = container.createDiv({ cls: "ai-hub-grid" });
 
     BATCH_PRESETS.forEach((p: BatchPreset) => {
@@ -1705,26 +1672,26 @@ export class BatchProcessModal extends Modal {
 
   private renderCustomPrompt(container: HTMLElement) {
     const stepLabel = container.createDiv({ cls: "ai-hub-step-label" });
-    stepLabel.createSpan({ text: "или свой промпт" });
+    stepLabel.createSpan({ text: tr("или свой промпт") });
     const customArea = container.createDiv({ cls: "ai-hub-custom-prompt" });
 
     const textarea = customArea.createEl("textarea", {
       attr: {
-        placeholder: "Введите инструкцию для AI...",
-        "aria-label": "Собственный промпт для обработки заметок",
+        placeholder: tr("Введите инструкцию для AI..."),
+        "aria-label": tr("Собственный промпт для обработки заметок"),
         rows: "3",
       },
     });
 
     new Setting(customArea).addButton((btn) =>
       btn
-        .setButtonText("Запустить")
+        .setButtonText(tr("Запустить"))
         .setIcon("play")
         .setCta()
         .onClick(() => {
           const v = textarea.value.trim();
           if (v) void this.confirmAndRun(v, "Custom");
-          else notify("warning", "Введите промпт для обработки");
+          else notify("warning", tr("Введите промпт для обработки"));
         }),
     );
   }
@@ -1732,7 +1699,7 @@ export class BatchProcessModal extends Modal {
   private renderFooter(container: HTMLElement) {
     const footer = container.createDiv({ cls: "ai-hub-footer-row" });
     new ButtonComponent(footer)
-      .setButtonText("Закрыть")
+      .setButtonText(tr("Закрыть"))
       .setIcon("x")
       .onClick(() => this.close());
   }
@@ -1784,8 +1751,8 @@ export class BatchProcessModal extends Modal {
     if (this.countElement) {
       this.countElement.setText(
         n === 0
-          ? "0 заметок"
-          : `${n} ${n === 1 ? "заметка" : n < 5 ? "заметки" : "заметок"}`,
+          ? tr("0 заметок")
+          : `${n} ${n === 1 ? tr("заметка") : n < 5 ? tr("заметки") : tr("заметок")}`,
       );
       this.countElement.classList.toggle("empty", n === 0);
     }
@@ -1829,7 +1796,7 @@ export class BatchProcessModal extends Modal {
   private async confirmAndRun(prompt: string, actionName: string) {
     const files = this.getFilesToProcess();
     if (files.length === 0) {
-      notify("warning", "Нет заметок под эти фильтры");
+      notify("warning", tr("Нет заметок под эти фильтры"));
       return;
     }
     this.close();
@@ -1845,7 +1812,7 @@ export class BatchProcessModal extends Modal {
   ): Promise<boolean> {
     return new Promise((resolve) => {
       const modal = new Modal(this.app);
-      modal.titleEl.setText("Подтверждение");
+      modal.titleEl.setText(tr("Подтверждение"));
       const c = modal.contentEl;
 
       c.createEl("p", {
@@ -1853,7 +1820,7 @@ export class BatchProcessModal extends Modal {
         cls: "ai-hub-confirm-title",
       });
       c.createEl("p", {
-        text: `Файлов: ${count}`,
+        text: tr("Файлов: {n}", { n: count }),
         cls: "ai-hub-confirm-count",
       });
 
@@ -1861,14 +1828,14 @@ export class BatchProcessModal extends Modal {
       box.setText(prompt);
 
       c.createDiv({
-        text: "Заметки будут изменены. Автобекап сохраняется в .ai-backup-*",
+        text: tr("Заметки будут изменены. Автобекап сохраняется в .ai-backup-*"),
         cls: "ai-hub-warning",
       });
 
       let done = false;
       const btns = c.createDiv({ cls: "modal-button-container" });
       new ButtonComponent(btns)
-        .setButtonText("Отмена")
+        .setButtonText(tr("Отмена"))
         .setIcon("x")
         .onClick(() => {
           done = true;
@@ -1876,7 +1843,7 @@ export class BatchProcessModal extends Modal {
           modal.close();
         });
       new ButtonComponent(btns)
-        .setButtonText("Запустить")
+        .setButtonText(tr("Запустить"))
         .setIcon("play")
         .setCta()
         .onClick(() => {
@@ -1914,7 +1881,7 @@ class AuditModeModal extends Modal {
   }
 
   async onOpen() {
-    this.titleEl.setText("Аудит хранилища");
+    this.titleEl.setText(tr("Аудит хранилища"));
     const { contentEl } = this;
     contentEl.empty();
     contentEl.addClass("ai-hub-modal-content");
@@ -1924,9 +1891,9 @@ class AuditModeModal extends Modal {
     const h2 = header.createEl("h2");
     const iconSpan = h2.createSpan({ cls: "ai-hub-accent-icon" });
     setIcon(iconSpan, "microscope");
-    h2.createSpan({ text: "Выберите режим аудита" });
+    h2.createSpan({ text: tr("Выберите режим аудита") });
     header.createEl("p", {
-      text: "Каждый режим оптимизирован под свою задачу",
+      text: tr("Каждый режим оптимизирован под свою задачу"),
     });
 
     // Загружаем индекс и считаем статистику
@@ -1949,7 +1916,7 @@ class AuditModeModal extends Modal {
     const statusRow = statusCard.createDiv({ cls: "ai-hub-index-status-row" });
     const sIcon = statusRow.createSpan({ cls: "ai-hub-accent-color" });
     setIcon(sIcon, "database");
-    statusRow.createSpan({ text: "Состояние индекса" });
+    statusRow.createSpan({ text: tr("Состояние индекса") });
 
     const grid = statusCard.createDiv({ cls: "ai-hub-stat-grid" });
 
@@ -1965,23 +1932,23 @@ class AuditModeModal extends Modal {
       }
     };
 
-    addStat("Всего заметок", stats.total);
+    addStat(tr("Всего заметок"), stats.total);
     addStat(
-      "В индексе (актуальные)",
+      tr("В индексе (актуальные)"),
       stats.fresh,
       "var(--color-green,#4caf50)",
     );
     addStat(
-      "Изменились",
+      tr("Изменились"),
       stats.stale,
       stats.stale > 0 ? "var(--text-warning,orange)" : undefined,
     );
     addStat(
-      "Новые (не в индексе)",
+      tr("Новые (не в индексе)"),
       stats.unseen,
       stats.unseen > 0 ? "var(--interactive-accent)" : undefined,
     );
-    addStat("Последний запуск", this.index.getUpdatedAt());
+    addStat(tr("Последний запуск"), this.index.getUpdatedAt());
 
     // Карточки режимов
     const modesGrid = contentEl.createDiv({ cls: "ai-hub-grid" });
@@ -1989,21 +1956,21 @@ class AuditModeModal extends Modal {
     // ── BATCH режим ──────────────────────────────────────────────────
     // this.createModeCard(modesGrid, {
     //   icon: "layers",
-    //   title: "Batch Аудит",
+    //   title: tr("Batch Аудит"),
     //   badge:
-    //     batchToProcess > 0 ? `${batchToProcess} к обработке` : "Всё актуально",
+    //     batchToProcess > 0 ? tr("{n} к обработке", { n: batchToProcess }) : tr("Всё актуально"),
     //   badgeColor:
     //     batchToProcess > 0
     //       ? "var(--interactive-accent)"
     //       : "var(--color-green,#4caf50)",
     //   lines: [
-    //     `По ${this.plugin.settings.deepAudit.batchSize} файлов за запрос`,
-    //     "Параллельные запросы к API",
-    //     "Инкрементальный (пропускает кэш)",
-    //     "Финальный отчёт + Canvas-карта",
+    //     tr("По {n} файлов за запрос", { n: this.plugin.settings.deepAudit.batchSize }),
+    //     tr("Параллельные запросы к API"),
+    //     tr("Инкрементальный (пропускает кэш)"),
+    //     tr("Финальный отчёт + Canvas-карта"),
     //   ],
-    //   speed: "Быстрый",
-    //   context: "~4 000 симв./файл",
+    //   speed: tr("Быстрый"),
+    //   context: tr("~4 000 симв./файл"),
     //   onClick: () => {
     //     this.close();
     //     void this.plugin.runDeepVaultAudit();
@@ -2019,17 +1986,17 @@ class AuditModeModal extends Modal {
 
     this.createModeCard(modesGrid, {
       icon: "scan-text",
-      title: "Single Аудит",
-      badge: `~${estMinSingle} мин`,
+      title: tr("Single Аудит"),
+      badge: tr("~{n} мин", { n: estMinSingle }),
       badgeColor: "var(--text-muted)",
       lines: [
-        "По одной заметке за запрос",
-        "Максимальный контекст файла",
-        "Детальный анализ каждой заметки",
-        "Обновляет индекс по ходу",
+        tr("По одной заметке за запрос"),
+        tr("Максимальный контекст файла"),
+        tr("Детальный анализ каждой заметки"),
+        tr("Обновляет индекс по ходу"),
       ],
-      speed: "Медленный",
-      context: "~15 000 симв./файл",
+      speed: tr("Медленный"),
+      context: tr("~15 000 симв./файл"),
       onClick: () => {
         this.close();
         void this.plugin.runSingleAudit(this.index, true);
@@ -2039,17 +2006,17 @@ class AuditModeModal extends Modal {
     // ── SINGLE (полный пересчёт) ──────────────────────────────────────
     this.createModeCard(modesGrid, {
       icon: "refresh-cw",
-      title: "Single — Полный",
-      badge: `${this.files.length} файлов`,
+      title: tr("Single — Полный"),
+      badge: tr("{n} файлов", { n: this.files.length }),
       badgeColor: "var(--text-muted)",
       lines: [
-        "Анализирует ВСЕ заметки",
-        "Игнорирует кэш",
-        "Для первого запуска или сброса",
-        "Занимает больше всего времени",
+        tr("Анализирует ВСЕ заметки"),
+        tr("Игнорирует кэш"),
+        tr("Для первого запуска или сброса"),
+        tr("Занимает больше всего времени"),
       ],
-      speed: "Очень медленный",
-      context: "~15 000 симв./файл",
+      speed: tr("Очень медленный"),
+      context: tr("~15 000 симв./файл"),
       onClick: () => {
         this.close();
         void this.plugin.runSingleAudit(this.index, false);
@@ -2059,17 +2026,17 @@ class AuditModeModal extends Modal {
     // ── Batch + финальный синтез ─────────────────────────────────────
     this.createModeCard(modesGrid, {
       icon: "brain",
-      title: "Batch + Отчёт",
-      badge: "Рекомендуется",
+      title: tr("Batch + Отчёт"),
+      badge: tr("Рекомендуется"),
       badgeColor: "var(--interactive-accent)",
       lines: [
-        "Batch анализ с кластеризацией",
-        "Глобальные инсайты по базе",
-        "Markdown-отчёт + Canvas",
-        "Полный MapReduce pipeline",
+        tr("Batch анализ с кластеризацией"),
+        tr("Глобальные инсайты по базе"),
+        tr("Markdown-отчёт + Canvas"),
+        tr("Полный MapReduce pipeline"),
       ],
-      speed: "Средний",
-      context: "~4 000 симв./файл",
+      speed: tr("Средний"),
+      context: tr("~4 000 симв./файл"),
       onClick: () => {
         this.close();
         void this.plugin.runDeepVaultAudit();
@@ -2093,7 +2060,7 @@ class AuditModeModal extends Modal {
     const card = container.createDiv({ cls: "ai-hub-card" });
     card.setAttribute("tabindex", "0");
     card.setAttribute("role", "button");
-    card.setAttribute("aria-label", `Режим: ${opts.title}`);
+    card.setAttribute("aria-label", tr("Режим: {m}", { m: opts.title }));
 
     // Иконка + заголовок
     const topRow = card.createDiv({ cls: "ai-hub-card-top" });

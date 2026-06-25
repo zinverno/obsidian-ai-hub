@@ -1,3 +1,4 @@
+import { t as tr } from "./i18n";
 import { requestUrl } from "obsidian";
 import { AIHubSettings } from "./settings";
 import { PROVIDER_PROFILES } from "./constants";
@@ -9,15 +10,15 @@ import {
 } from "./constants";
 
 export function validateSettings(settings: AIHubSettings): string | null {
-  if (!settings.model.trim()) return "⚠️ Укажите название модели!";
-  if (!settings.baseUrl.trim()) return "⚠️ Укажите Base URL!";
+  if (!settings.model.trim()) return tr("⚠️ Укажите название модели!");
+  if (!settings.baseUrl.trim()) return tr("⚠️ Укажите Base URL!");
   if (settings.temperature < 0 || settings.temperature > 1) {
-    return "⚠️ Temperature должен быть 0.0–1.0";
+    return tr("⚠️ Temperature должен быть 0.0–1.0");
   }
   // API key нужен не всем провайдерам
   const profile = PROVIDER_PROFILES[settings.provider ?? "openrouter"];
   if (profile.requiresApiKey && !settings.apiKey.trim()) {
-    return `⚠️ Введите API Key для ${profile.label}!`;
+    return tr("⚠️ Введите API Key для {p}!", { p: profile.label });
   }
   return null;
 }
@@ -197,7 +198,7 @@ export async function callOpenRouter(
   );
 
   if (!res.ok) {
-    const errorText = await res.text().catch(() => "Нет деталей");
+    const errorText = await res.text().catch(() => tr("Нет деталей"));
     throw new Error(`API ${res.status}: ${errorText.slice(0, 200)}`);
   }
 
@@ -246,7 +247,7 @@ export async function streamOpenRouter(
     const errorText = await res.text().catch(() => "");
     throw new Error(`API ${res.status}: ${errorText.slice(0, 200)}`);
   }
-  if (!res.body) throw new Error("Нет тела ответа");
+  if (!res.body) throw new Error(tr("Нет тела ответа"));
 
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
@@ -283,7 +284,7 @@ export async function streamOpenRouter(
           generated += content;
           if (detectRepetitionLoop(generated)) {
             // Прерываем стрим — модель зациклилась
-            console.warn("[AI Hub] Обнаружена петля повторений, стрим прерван");
+            console.warn(tr("[AI Hub] Обнаружена петля повторений, стрим прерван"));
             return;
           }
           // ────────────────────────────────────────────────
@@ -313,7 +314,7 @@ export async function testConnection(settings: AIHubSettings): Promise<string> {
       { method: "GET" },
       5000,
     );
-    if (!res.ok) throw new Error(`Ollama не отвечает: HTTP ${res.status}`);
+    if (!res.ok) throw new Error(tr("Ollama не отвечает: HTTP {code}", { code: res.status }));
     const json = (await res.json()) as { models?: Array<{ name: string }> };
     const count = json.models?.length ?? 0;
     const names =
@@ -321,7 +322,7 @@ export async function testConnection(settings: AIHubSettings): Promise<string> {
         ?.slice(0, 3)
         .map((m) => m.name)
         .join(", ") ?? "";
-    return `✓ Ollama доступен · ${count} моделей${names ? ": " + names : ""}`;
+    return tr("✓ Ollama доступен · {n} моделей{names}", { n: count, names: names ? ": " + names : "" });
   }
 
   // Для остальных — минимальный запрос к chat/completions
@@ -349,7 +350,7 @@ export async function testConnection(settings: AIHubSettings): Promise<string> {
   }
 
   const profile = PROVIDER_PROFILES[provider];
-  return `✓ ${profile.label} отвечает · Модель: ${settings.model}`;
+  return tr("✓ {p} отвечает · Модель: {m}", { p: profile.label, m: settings.model });
 }
 
 // ─────────────────────────────────────────────
