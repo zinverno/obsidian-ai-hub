@@ -1,135 +1,84 @@
-# Obsidian AI Hub
+# Vault Audit AI
 
-**AI Hub for Obsidian** is a plugin for Obsidian that integrates the capabilities of Large Language Models (LLM) directly into your knowledge base. It supports many providers (OpenRouter, Ollama, OpenAI, Groq, etc.) and provides powerful tools for working with notes: from text generation to deep auditing of the entire knowledge base.
+**AI-powered audit and maintenance for your Obsidian vault.** Find orphan notes, cluster topics, get tag and link recommendations, and batch-process hundreds of notes — using any LLM provider: OpenRouter, OpenAI, Groq, or fully local via Ollama.
+
+Most AI plugins help you *write*. This one helps you keep a large vault *healthy*.
+
+## Why this plugin
+
+Vaults rot. After a year of daily notes you end up with orphan notes nobody links to, duplicated topics under different tags, and clusters of related ideas that never got connected. Graph view shows you the mess; this plugin actually analyzes it and tells you what to do.
 
 ## Features
 
-### Main functions
-- **Text generation**: Inserting AI content into notes via the context menu or keyboard shortcuts
-- **Selection work**: analysis, expansion, reduction and reformulation of the selected text
-- **Batch processing**: automatic processing of multiple notes at the same time
-- **Deep knowledge base audit**:
-- Two-phase MapReduce -analysis of all notes
-- Identification of orphan notes
-- Recommendations on tags and links
-- Clustering by topic
-  - Reports in Markdown format with Dataview inserts and links to notes
-- **Indexing notes**: caching analysis results for fast incremental auditing — only modified notes are re-processed
-- **Streaming**: Displaying AI responses in real time
+### 🔬 Deep vault audit
+A two-phase MapReduce analysis of your entire vault:
 
-### Supported Providers
-- **OpenRouter** — 100+ models, including free ones
-- **Ollama** — local models
-- **OpenAI** — GPT-4o, o1, o3-mini and others
-- **Groq** — fast inference models
-- **Custom** — any compatible API
+- **Orphan detection** — notes with no incoming or outgoing links
+- **Topic clustering** — related notes grouped by theme, exported as a Canvas map
+- **Tag & link recommendations** — what to connect and how to label it
+- **Markdown reports** with Dataview embeds and direct links to every mentioned note
+- **Incremental indexing** — analysis results are cached; re-runs only process changed notes, saving tokens and time
+
+### ⚡ Batch processing
+Filter notes by folder, tags, or date range — then apply an action to all of them at once: improve style, summarize, auto-tag, add examples, fix grammar, or run your own custom prompt.
+
+### ✍️ Inline AI assistance
+Generate and insert text via the context menu or hotkeys; analyze, expand, shorten, or rephrase selections; generate Dataview queries. Responses stream in real time with loop detection and abort handling.
+
+### 🔌 Providers
+- **OpenRouter** — 100+ models; built-in button fetches the live list of currently available free models
+- **Ollama** — fully local, nothing leaves your machine
+- **OpenAI** — GPT-4o, o1 and others
+- **Groq** — fast free inference
+- **Custom** — any OpenAI-compatible API
+
+## Privacy & behavior disclosure
+
+- To build the audit index, the plugin enumerates the files in your vault and sends **note content to the LLM provider you configured** (or to a local Ollama instance — in that case nothing leaves your machine).
+- Nothing is sent anywhere until you explicitly run an action.
+- The "copy to clipboard" insertion mode writes AI output to your system clipboard.
+- API keys are stored in Obsidian's standard plugin settings on your device.
 
 ## Installation
 
-### Option 1: Build from source
+### From the community catalog
+Settings → Community plugins → Browse → search for **Vault Audit AI** → Install.
 
-1. Clone the repository:
-   ```bash
-   git clone <repository-url>
-   cd obsidian-ai-hub
-   ```
-
-2. Install the dependencies:
-``bash
-   npm install
-   ```
-
-3. Build the plugin:
-``bash
-   npm run build
-   ```
-
-4. Copy the files `main.js ` and `manifest.json` to the Obsidian plugin folder
-   (the styles are embedded in the `main.js`, no separate css file required):
-``
-   <your-storage-Obsidian>/.obsidian/plugins/obsidian-ai-hub/
-   ```
-
-### Option 2: Development Mode
-
-For automatic reassembly when changing the code:
-``bash
-npm run dev
+### From source
+```bash
+git clone https://github.com/zinverno/obsidian-ai-hub
+cd obsidian-ai-hub
+npm install
+npm run build
 ```
+Copy `main.js`, `manifest.json` and `styles.css` into `<your-vault>/.obsidian/plugins/ai-knowledge-hub/`, then enable the plugin.
 
-## Privacy
+## Quick start
 
-The AI Hub sends the contents of the note (or a selected fragment) to the server
-of the provider you selected in the settings — OpenRouter, OpenAI or
-Groq. This data is processed according to the privacy policy of this service.
+1. Open plugin settings, pick a provider (Groq and OpenRouter have free tiers; Ollama is free and local).
+2. Paste an API key (not needed for Ollama) and press **Test connection**.
+3. Run the deep audit from the command palette, or open the control panel for batch processing.
 
-If you use **Ollama**, everything works locally on your computer —
-nothing goes outside.
-
-The API key and index of notes are stored locally in your storage and
-are not transferred anywhere.
-
-## Setting up
-
-1. Open **Settings → Community plugins → AI Hub**
-2. Select a provider (OpenRouter, Ollama, OpenAI, Groq or Custom)
-3. Enter the API key (if required)
-4. Specify the model (for example, `google/gemma-2-9b-it:free` for OpenRouter)
-5. Configure the settings:
-   - **Temperature** (0.0–1.0) — creativity of responses
-   - **Base URL** — API address (by default, it is substituted for the selected provider)
-
-## Usage
-
-### Text generation
-1. Open any note
-2. Place the cursor in the desired location or select the text.
-3. Open AI via the context menu (right click → **AI Hub**) or the command palette (`Ctrl/Cmd + P`)
-
-### Deep audit
-1. Run the command **"AI Hub: Deep Audit Vault"**
-2. Wait for the analysis to complete (progress is displayed in the modal window)
-3. Receive a report with recommendations for improving the knowledge base
-
-### Batch processing
-1. Select several notes
-2. Run the batch command
-3. AI will process all selected notes based on the preset settings.
-
-## Technical Details
-
-### Project structure
-```
-obsidian-ai-hub/
-├── main.ts # The main plugin file
-─── api.ts # Working with LLM providers' API
-├── constants.ts # Constants and Provider Configurations
-├── settings.ts # Plugin Settings
-├── deepAudit.ts # Deep Audit Engine
-├── noteIndex.ts # Indexing notes
-├── style.css # Styles (reserved; styles are currently embedded in main.ts)
-├── manifest.json # Manifest of the Obsidian plugin
-└── package.json # Node dependencies.js
-```
-
-### Requirements
-- **Obsidian** v1.4.0+
-- **Node.js** v18+
-- **TypeScript** v5.3.3
-
-### Dependencies
-- 'esbuild' — quick TypeScript build
-- `obsidian' — Obsidian types and APIs
-- `typescript' — compilation of TS
-
-## License
-
-MIT — for more information, see the [LICENSE](LICENSE) file.
-
-## Contribution to the project
-
-Pull requests, bug reports, and suggestions for improvement are accepted!
+> **Note:** the plugin UI is currently in Russian; an English localization is planned.
 
 ---
 
-**Made with ❤️ for the Obsidian community**
+# Vault Audit AI (на русском)
+
+**ИИ-аудит и обслуживание вашего хранилища Obsidian.** Поиск заметок-сирот, кластеризация тем, рекомендации тегов и связей, пакетная обработка сотен заметок — через любого провайдера: OpenRouter, OpenAI, Groq или локально через Ollama.
+
+## Возможности
+
+- **Глубокий аудит**: двухфазный MapReduce-анализ всего хранилища — сироты, кластеры тем, рекомендации связей, отчёты с Dataview и Canvas-картой
+- **Инкрементальный индекс**: повторный аудит обрабатывает только изменённые заметки
+- **Пакетная обработка**: фильтры по папке/тегам/датам + действие над всеми заметками сразу (стиль, суммаризация, авто-теги, свой промпт)
+- **Работа с текстом**: генерация и обработка выделения из контекстного меню, потоковый вывод, генерация Dataview-запросов
+- **Провайдеры**: OpenRouter (с живым списком бесплатных моделей), Ollama (полностью локально), OpenAI, Groq, любой совместимый API
+
+## Приватность
+
+Для аудита плагин перечисляет файлы хранилища и отправляет содержимое заметок выбранному вами провайдеру (при использовании Ollama данные не покидают ваш компьютер). Ничего не отправляется без явного запуска действия. Режим вставки «в буфер обмена» пишет результат в системный буфер.
+
+## Лицензия / License
+
+MIT © 2026 Zinvernix
