@@ -249,6 +249,7 @@ const EN: Record<string, string> = {
   "Полный MapReduce pipeline": "Full MapReduce pipeline",
   "После выделения": "After the selection",
   "Последний запуск": "Last run",
+  "никогда": "never",
   "Практика": "Practice",
   "Примерное время": "Estimated time",
   "Проанализировать структуру хранилища": "Analyze vault structure",

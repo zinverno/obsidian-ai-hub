@@ -660,7 +660,7 @@ export default class AIHubPlugin extends Plugin {
       opts.forEach((opt) => {
         menu.addItem((item) => {
           item
-            .setTitle(INSERTION_LABELS[opt])
+            .setTitle(tr(INSERTION_LABELS[opt]))
             .setIcon(opt === def ? "check" : INSERTION_ICONS[opt])
             .onClick(() => {
               resolved = true;
@@ -1655,16 +1655,16 @@ export class BatchProcessModal extends Modal {
       const iconDiv = card.createDiv({ cls: "ai-hub-card-icon" });
       setIcon(iconDiv, p.icon);
 
-      card.createDiv({ text: p.title, cls: "ai-hub-card-title" });
-      card.createDiv({ text: p.desc, cls: "ai-hub-card-desc" });
+      card.createDiv({ text: tr(p.title), cls: "ai-hub-card-title" });
+      card.createDiv({ text: tr(p.desc), cls: "ai-hub-card-desc" });
 
       card.addEventListener("click", () => {
-        void this.confirmAndRun(p.prompt, p.title);
+        void this.confirmAndRun(tr(p.prompt), tr(p.title));
       });
       card.addEventListener("keydown", (e: KeyboardEvent) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
-          void this.confirmAndRun(p.prompt, p.title);
+          void this.confirmAndRun(tr(p.prompt), tr(p.title));
         }
       });
     });
@@ -1948,7 +1948,7 @@ class AuditModeModal extends Modal {
       stats.unseen,
       stats.unseen > 0 ? "var(--interactive-accent)" : undefined,
     );
-    addStat(tr("Последний запуск"), this.index.getUpdatedAt());
+    addStat(tr("Последний запуск"), this.index.getUpdatedAt() || tr("никогда"));
 
     // Карточки режимов
     const modesGrid = contentEl.createDiv({ cls: "ai-hub-grid" });

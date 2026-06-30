@@ -96,7 +96,7 @@ export class AIHubSettingTab extends PluginSettingTab {
     const heroIcon = hero.createDiv({ cls: "ai-hub-hero-icon" });
     setIcon(heroIcon, "brain");
     const heroText = hero.createDiv();
-    heroText.createDiv({ text: "AI Hub", cls: "ai-hub-hero-title" });
+    heroText.createDiv({ text: "Vault Audit Ai", cls: "ai-hub-hero-title" });
     heroText.createDiv({
       text: tr("Настройки плагина"),
       cls: "ai-hub-hero-sub",
@@ -183,7 +183,7 @@ export class AIHubSettingTab extends PluginSettingTab {
       const iconWrap = card.createDiv({ cls: "ai-hub-provider-icon" });
       setIcon(iconWrap, profile.icon);
 
-      card.createDiv({ text: profile.label, cls: "ai-hub-provider-name" });
+      card.createDiv({ text: tr(profile.label), cls: "ai-hub-provider-name" });
       card.createDiv({
         text: tr(profile.description),
         cls: "ai-hub-provider-desc",
