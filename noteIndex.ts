@@ -1,8 +1,8 @@
 import { App, TFile } from 'obsidian';
+import { dateLocale } from './i18n';
 
 // ─── Версия схемы — увеличивай при breaking changes ───────────────────
 const SCHEMA_VERSION = 2;
-const INDEX_PATH = '.obsidian/plugins/ai-hub/note-index.json';
 
 // ─── Запись об одной заметке ──────────────────────────────────────────
 export interface NoteRecord {
@@ -60,10 +60,19 @@ export class NoteIndexManager {
 
     constructor(private app: App) {}
 
+    // Путь строится из реального configDir и id плагина (не хардкод .obsidian)
+    private get pluginDir(): string {
+        return `${this.app.vault.configDir}/plugins/ai-knowledge-hub`;
+    }
+
+    private get indexPath(): string {
+        return `${this.pluginDir}/note-index.json`;
+    }
+
     // ── Загрузка из диска ────────────────────────────────────────────
     async load(): Promise<void> {
         try {
-            const raw = await this.app.vault.adapter.read(INDEX_PATH);
+            const raw = await this.app.vault.adapter.read(this.indexPath);
             const parsed: NoteIndexData = JSON.parse(raw);
             if (parsed.version === SCHEMA_VERSION && parsed.notes) {
                 this.data = parsed;
@@ -80,10 +89,10 @@ export class NoteIndexManager {
         if (!this.dirty) return;
         this.data.updatedAt = new Date().toISOString();
         try {
-            await this.app.vault.adapter.mkdir('.obsidian/plugins/ai-hub');
+            await this.app.vault.adapter.mkdir(this.pluginDir);
         } catch { /* папка уже есть */ }
         await this.app.vault.adapter.write(
-            INDEX_PATH,
+            this.indexPath,
             JSON.stringify(this.data, null, 2),
         );
         this.dirty = false;
@@ -154,10 +163,11 @@ export class NoteIndexManager {
         return Object.keys(this.data.notes).length;
     }
 
+    /** Возвращает '' если индекс ни разу не строился (рендер сам подставит перевод) */
     getUpdatedAt(): string {
-        if (!this.data.updatedAt) return 'никогда';
+        if (!this.data.updatedAt) return '';
         try {
-            return new Date(this.data.updatedAt).toLocaleString('ru-RU');
+            return new Date(this.data.updatedAt).toLocaleString(dateLocale());
         } catch {
             return this.data.updatedAt;
         }

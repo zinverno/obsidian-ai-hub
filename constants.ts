@@ -37,20 +37,16 @@ export const PROVIDER_PROFILES: Record<LLMProvider, ProviderProfile> = {
     description: "100+ моделей, есть бесплатные",
     defaultBaseUrl: "https://openrouter.ai/api/v1",
     requiresApiKey: true,
-    defaultModel: "google/gemma-2-9b-it:free",
-    modelPlaceholder: "google/gemma-2-9b-it:free",
+    defaultModel: "openrouter/free",
+    modelPlaceholder: "openrouter/free",
     apiKeyPlaceholder: "sk-or-v1-...",
     apiKeyPrefix: "sk-or-v1-",
     popularModels: [
-      { id: "google/gemma-2-9b-it:free", label: "Gemma 2 9B", tag: "Free" },
+      { id: "openrouter/free", label: "Auto (free)", tag: "Free" },
+      { id: "openai/gpt-oss-20b:free", label: "GPT-OSS 20B", tag: "Free" },
       {
-        id: "meta-llama/llama-3.2-3b-instruct:free",
-        label: "Llama 3.2 3B",
-        tag: "Free",
-      },
-      {
-        id: "mistralai/mistral-7b-instruct:free",
-        label: "Mistral 7B",
+        id: "meta-llama/llama-3.3-70b-instruct:free",
+        label: "Llama 3.3 70B",
         tag: "Free",
       },
       {
