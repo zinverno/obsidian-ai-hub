@@ -166,7 +166,9 @@
 }
 
 .modal .ai-hub-filters .setting-item,
-.ai-hub-filters .setting-item {
+.modal .ai-hub-filters .setting-item:not(:first-child),
+.ai-hub-filters .setting-item,
+.ai-hub-filters .setting-item:not(:first-child) {
     padding: 0;
     margin: 0;
     border: none;
@@ -254,6 +256,12 @@
     grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
     gap: var(--ai-space-sm);
     margin-bottom: var(--ai-space-xl);
+}
+
+/* Нечётное число карточек: последняя занимает весь ряд,
+   чтобы не висела одна в обрезанной колонке */
+.ai-hub-grid .ai-hub-card:last-child:nth-child(odd) {
+    grid-column: 1 / -1;
 }
 
 /* --- Card base --------------------------------------- */
