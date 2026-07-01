@@ -194,6 +194,12 @@ export interface BatchPreset {
   title: string;
   desc: string;
   prompt: string;
+  /**
+   * Если true — ответ модели НЕ перезаписывает заметку, а дописывается
+   * отдельной секцией в конец (основной текст не трогается).
+   * Используется для генерации флешкарт Spaced Repetition.
+   */
+  append?: boolean;
 }
 
 export const BATCH_PRESETS: BatchPreset[] = [
@@ -233,5 +239,13 @@ export const BATCH_PRESETS: BatchPreset[] = [
     title: "Исправить ошибки",
     desc: "Грамматика",
     prompt: "Исправь грамматику и пунктуацию, не меняя смысл.",
+  },
+  {
+    icon: "layers",
+    title: "Флешкарты",
+    desc: "Интервальное повторение",
+    // Длинный шаблон промпта живёт в i18n под @-ключом (RU + EN).
+    prompt: "@flashcards_prompt",
+    append: true,
   },
 ];

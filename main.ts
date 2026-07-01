@@ -1061,7 +1061,7 @@ export default class AIHubPlugin extends Plugin {
   }
 
   // === Батч-обработка ===
-  async runBatchProcessing(files: TFile[], query: string) {
+  async runBatchProcessing(files: TFile[], query: string, append = false) {
     const backupFolder = normalizePath(`.ai-backup-${Date.now()}`);
     await this.app.vault.createFolder(backupFolder).catch(() => {
       /* уже есть */
@@ -1082,11 +1082,21 @@ export default class AIHubPlugin extends Plugin {
         progress.logPending(file.name);
         const content = await this.app.vault.read(file);
 
-        const newContent = await callOpenRouter(
-          this.settings,
-          tr("Ты — редактор. Верни ТОЛЬКО изменённый текст, без пояснений."),
-          `Текст заметки:\n${content}\n\nИнструкция: ${query}\n\nВерни полный изменённый текст.`,
-        );
+        let newContent: string;
+        if (append) {
+          // Флешкарты: модель возвращает ТОЛЬКО карточки, основной текст
+          // не трогаем — дописываем отдельной секцией в конец заметки.
+          const raw = await callOpenRouter(this.settings, query, content);
+          const cards = extractFlashcards(raw);
+          if (!cards) throw new Error(tr("Некорректный ответ AI"));
+          newContent = `${content.replace(/\s+$/, "")}\n\n## Flashcards\n#flashcards\n\n${cards}\n`;
+        } else {
+          newContent = await callOpenRouter(
+            this.settings,
+            tr("Ты — редактор. Верни ТОЛЬКО изменённый текст, без пояснений."),
+            `Текст заметки:\n${content}\n\nИнструкция: ${query}\n\nВерни полный изменённый текст.`,
+          );
+        }
 
         const backupPath = normalizePath(`${backupFolder}/${file.name}`);
         await this.app.vault.create(backupPath, content).catch(() => {
@@ -1253,6 +1263,26 @@ class BatchProgressModal extends Modal {
   logError(name: string, msg: string) {
     this.addEntry(`✗ ${name}: ${msg}`, "ai-hub-log-error");
   }
+}
+
+// === ФЛЕШКАРТЫ ===
+/**
+ * Чистит ответ модели до валидных inline-карточек Spaced Repetition.
+ * Оставляет только строки вида «Вопрос::Ответ», срезает нумерацию,
+ * маркеры списков, markdown-обёртки и любые вступления/комментарии,
+ * которые модель могла добавить вопреки промпту.
+ */
+function extractFlashcards(raw: string): string {
+  return raw
+    .replace(/```[a-zA-Z]*\n?/g, "")
+    .replace(/```/g, "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.includes("::"))
+    .map((line) => line.replace(/^(?:[-*+•]|\d+[.)])\s+/, "").trim())
+    .filter((line) => line.length > 0)
+    .join("\n")
+    .trim();
 }
 
 // === УВЕДОМЛЕНИЯ ===
@@ -1659,12 +1689,12 @@ export class BatchProcessModal extends Modal {
       card.createDiv({ text: tr(p.desc), cls: "ai-hub-card-desc" });
 
       card.addEventListener("click", () => {
-        void this.confirmAndRun(tr(p.prompt), tr(p.title));
+        void this.confirmAndRun(tr(p.prompt), tr(p.title), p.append);
       });
       card.addEventListener("keydown", (e: KeyboardEvent) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
-          void this.confirmAndRun(tr(p.prompt), tr(p.title));
+          void this.confirmAndRun(tr(p.prompt), tr(p.title), p.append);
         }
       });
     });
@@ -1793,7 +1823,11 @@ export class BatchProcessModal extends Modal {
     if (this.previewOpen) this.renderPreviewList();
   }
 
-  private async confirmAndRun(prompt: string, actionName: string) {
+  private async confirmAndRun(
+    prompt: string,
+    actionName: string,
+    append = false,
+  ) {
     const files = this.getFilesToProcess();
     if (files.length === 0) {
       notify("warning", tr("Нет заметок под эти фильтры"));
@@ -1802,7 +1836,7 @@ export class BatchProcessModal extends Modal {
     this.close();
 
     const confirmed = await this.askConfirm(prompt, actionName, files.length);
-    if (confirmed) await this.plugin.runBatchProcessing(files, prompt);
+    if (confirmed) await this.plugin.runBatchProcessing(files, prompt, append);
   }
 
   private askConfirm(

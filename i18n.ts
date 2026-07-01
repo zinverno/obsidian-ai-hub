@@ -57,6 +57,7 @@ const RU: Record<string, string> = {
   "@canvas_folders": "## 📂 Структура папок\n{folders}",
   "@batch_report": "# AI Batch Report\n\n📊 **Результат**\n- Успешно: {ok}\n- Ошибок: {err}\n- Backup: `{backup}/`\n",
   "@batch_errors": "\n## ⚠️ Ошибки\n{list}\n",
+  "@flashcards_prompt": "Ты — генератор карточек для интервального повторения (Spaced Repetition, плагин st3v3nmw) в Obsidian. Тебе дан текст заметки. Составь по нему карточки для запоминания.\n\nТРЕБОВАНИЯ:\n- Количество: от 3 до 7 карточек в зависимости от объёма заметки (меньше — для коротких, больше — для объёмных). Покрывай ключевые идеи.\n- Формат каждой карточки — однострочный inline с разделителем «::»: Вопрос::Ответ. Одна карточка на строку.\n- Ответы короткие: 1-2 предложения, потому что формат однострочный.\n- Формулируй вопросы так, чтобы они проверяли понимание сути, а не дословный пересказ.\n- Пиши карточки на русском языке.\n\nСТРОГО (иначе ответ бесполезен):\n- Верни ТОЛЬКО карточки в формате «Вопрос::Ответ», по одной на строку.\n- БЕЗ нумерации, БЕЗ маркеров списка, БЕЗ дефисов в начале строк.\n- БЕЗ markdown-обёрток и блоков кода (никаких ``` и заголовков).\n- БЕЗ вступлений, пояснений и комментариев. НЕ пиши «Вот ваши карточки:», «Конечно» и т.п.\n- Не добавляй пустых строк между карточками.\n- Не повторяй исходный текст заметки.",
 };
 
 const EN: Record<string, string> = {
@@ -79,6 +80,9 @@ const EN: Record<string, string> = {
   "@canvas_folders": "## 📂 Folder structure\n{folders}",
   "@batch_report": "# AI Batch Report\n\n📊 **Result**\n- Succeeded: {ok}\n- Errors: {err}\n- Backup: `{backup}/`\n",
   "@batch_errors": "\n## ⚠️ Errors\n{list}\n",
+  "@flashcards_prompt": "You are a flashcard generator for the Spaced Repetition plugin (by st3v3nmw) in Obsidian. You are given the text of a note. Create recall flashcards from it.\n\nREQUIREMENTS:\n- Count: 3 to 7 cards depending on the note's size (fewer for short notes, more for long ones). Cover the key ideas.\n- Each card uses the single-line inline format with the «::» separator: Question::Answer. One card per line.\n- Keep answers short: 1-2 sentences, because the format is single-line.\n- Phrase questions so they test understanding of the idea, not verbatim recall.\n- Write the flashcards in English.\n\nSTRICT (otherwise the output is useless):\n- Return ONLY the cards in the format Question::Answer, one per line.\n- NO numbering, NO list bullets, NO leading dashes.\n- NO markdown wrappers or code blocks (no ``` and no headings).\n- NO intros, explanations or comments. Do NOT write \"Here are your cards:\", \"Sure\", etc.\n- Do not add blank lines between cards.\n- Do not repeat the original note text.",
+  "Флешкарты": "Flashcards",
+  "Интервальное повторение": "Spaced repetition",
   " · Бесплатные модели доступны без баланса": " · Free models work without a balance",
   "Показать актуальные бесплатные модели": "Show current free models",
   "## Итог": "## Summary",
