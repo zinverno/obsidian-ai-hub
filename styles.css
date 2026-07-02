@@ -152,6 +152,9 @@
 .ai-hub-filters {
     display: grid;
     grid-template-columns: 1fr 1fr;
+    /* Ячейки не растягиваются на высоту ряда — обе колонки прижаты к верху */
+    align-items: start;
+    align-content: start;
     gap: var(--ai-space-md);
     margin-bottom: var(--ai-space-lg);
     background: var(--background-secondary);

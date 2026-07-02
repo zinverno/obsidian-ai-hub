@@ -1332,10 +1332,16 @@ function extractFlashcards(raw: string): string {
     .replace(/```[a-zA-Z]*\n?/g, "")
     .replace(/```/g, "")
     .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.includes("::"))
-    .map((line) => line.replace(/^(?:[-*+•]|\d+[.)])\s+/, "").trim())
-    .filter((line) => line.length > 0)
+    .map((line) => line.trim().replace(/^(?:[-*+•]|\d+[.)])\s+/, "").trim())
+    .filter((line) => {
+      // Валидная карточка: непустой текст по обе стороны первого "::"
+      const sep = line.indexOf("::");
+      if (sep === -1) return false;
+      return (
+        line.slice(0, sep).trim().length > 0 &&
+        line.slice(sep + 2).trim().length > 0
+      );
+    })
     .join("\n")
     .trim();
 }
