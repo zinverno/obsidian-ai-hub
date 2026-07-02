@@ -1,13 +1,15 @@
 // Авто-генерируемый модуль локализации AI Hub / Vault Audit AI
 // Ключ = русская строка (или @named для длинных шаблонов).
 
+import { getLanguage } from "obsidian";
+
 export type AIHubLang = "auto" | "en" | "ru";
 
 let resolved: "en" | "ru" = "ru";
 
 export function setLanguage(l: AIHubLang): void {
   if (l === "auto") {
-    const sys = window.localStorage.getItem("language");
+    const sys = getLanguage();
     resolved = sys && sys.toLowerCase().startsWith("ru") ? "ru" : "en";
   } else {
     resolved = l;
