@@ -140,6 +140,14 @@ export default class AIHubPlugin extends Plugin {
         callback: () => new BatchProcessModal(this.app, this).open(),
       });
 
+      this.addCommand({
+        id: "ai-generate-mocs",
+        name: tr("Сгенерировать MOC из кластеров"),
+        callback: () => {
+          void this.generateMOCsFromClusters();
+        },
+      });
+
       if (this.settings.showContextMenu) {
         this.registerEvent(
           this.app.workspace.on("editor-menu", (menu, editor) => {
@@ -1206,6 +1214,74 @@ export default class AIHubPlugin extends Plugin {
       new Notice(`❌ Ошибка: ${msg}`);
     }
   }
+
+  // === MOC из кластеров аудита ===
+  async generateMOCsFromClusters() {
+    const index = new NoteIndexManager(this.app);
+    await index.load();
+    const clusters = index.getClusters();
+    if (clusters.length === 0) {
+      new Notice(tr("Сначала запустите глубокий аудит"));
+      return;
+    }
+
+    const folder = normalizePath(
+      this.settings.mocFolder.replace(/\/+$/, "") || "MOCs",
+    );
+    await this.app.vault.createFolder(folder).catch(() => {
+      /* уже есть */
+    });
+
+    const notice = notify("loading", tr("Генерирую MOC..."));
+    let created = 0;
+    try {
+      for (const cluster of clusters) {
+        let desc = cluster.description?.trim() ?? "";
+        if (!desc) {
+          // Описания из reduce нет — один запрос к LLM на кластер
+          desc = (
+            await callOpenRouter(
+              this.settings,
+              tr("@moc_desc_sys"),
+              tr("@moc_desc_user", {
+                name: cluster.name,
+                files: cluster.filePaths.slice(0, 30).join("\n"),
+              }),
+              { maxTokens: 200 },
+            )
+          ).trim();
+        }
+
+        const links = cluster.filePaths
+          .map((p) => `- [[${p.replace(/\.md$/, "")}]]`)
+          .join("\n");
+
+        const content = tr("@moc_note", {
+          iso: new Date().toISOString(),
+          title: cluster.name,
+          desc,
+          n: cluster.filePaths.length,
+          links,
+        });
+
+        const fileName = sanitizeMocFileName(cluster.name) || "MOC";
+        const path = normalizePath(`${folder}/${fileName}.md`);
+        const existing = this.app.vault.getAbstractFileByPath(path);
+        if (existing instanceof TFile) {
+          await this.app.vault.modify(existing, content);
+        } else {
+          await this.app.vault.create(path, content);
+        }
+        created++;
+      }
+      notice.hide();
+      notify("success", tr("✅ Создано MOC: {n}", { n: created }));
+    } catch (err) {
+      notice.hide();
+      const msg = err instanceof Error ? err.message : String(err);
+      new Notice(`❌ Ошибка: ${msg}`);
+    }
+  }
 }
 
 // === ПРОГРЕСС-МОДАЛКИ ===
@@ -1343,6 +1419,20 @@ function extractFlashcards(raw: string): string {
       );
     })
     .join("\n")
+    .trim();
+}
+
+// === MOC ===
+/**
+ * Имя файла MOC из темы кластера: срезает символы, запрещённые в именах
+ * файлов и ломающие вики-ссылки, схлопывает пробелы, ограничивает длину.
+ */
+function sanitizeMocFileName(name: string): string {
+  return name
+    .replace(/[\\/:*?"<>|#^[\]]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 80)
     .trim();
 }
 

@@ -29,6 +29,8 @@ export interface AIHubSettings {
   defaultInsertion: InsertionType;
   newNoteFolder: string;
   filenameTemplate: string;
+  /** Папка для MOC-заметок, генерируемых из кластеров аудита */
+  mocFolder: string;
   // ── Интерфейс ─────────────────────────────────────────────────────
   showContextMenu: boolean;
   notifyOnCopy: boolean;
@@ -51,6 +53,7 @@ export const DEFAULT_SETTINGS: AIHubSettings = {
   defaultInsertion: "end",
   newNoteFolder: "",
   filenameTemplate: "AI-{{date}}-{{topic}}",
+  mocFolder: "MOCs/",
   showContextMenu: true,
   notifyOnCopy: true,
   language: "auto",
@@ -620,6 +623,23 @@ export class AIHubSettingTab extends PluginSettingTab {
             });
         }),
       "folder",
+    );
+
+    this.addIcon(
+      new Setting(el)
+        .setName(tr("Папка для MOC-заметок"))
+        .setDesc(tr("Куда складывать MOC, сгенерированные из кластеров аудита"))
+        .addText((t) => {
+          t.inputEl.setAttribute("aria-label", tr("Папка для MOC-заметок"));
+          return t
+            .setPlaceholder("MOCs/")
+            .setValue(this.plugin.settings.mocFolder)
+            .onChange(async (v) => {
+              this.plugin.settings.mocFolder = v.trim();
+              await save();
+            });
+        }),
+      "map",
     );
 
     this.addIcon(

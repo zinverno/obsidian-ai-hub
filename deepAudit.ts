@@ -230,6 +230,18 @@ export class DeepAuditEngine {
     // 4. REDUCE-фаза: кластеризация (возможно иерархически)
     const clusters = await this.runReducePhase(allSummaries);
 
+    // Сохраняем кластеры в индекс — их использует генератор MOC
+    if (this.index) {
+      this.index.setClusters(
+        clusters.map((c) => ({
+          name: c.name,
+          description: c.description,
+          filePaths: c.filePaths,
+        })),
+      );
+      await this.index.save();
+    }
+
     // 5. Финальные инсайты и план
     const { globalInsights, actionPlan } = await this.runFinalSynthesis(
       clusters,

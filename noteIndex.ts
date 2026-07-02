@@ -2,7 +2,7 @@ import { App, TFile } from 'obsidian';
 import { dateLocale } from './i18n';
 
 // ─── Версия схемы — увеличивай при breaking changes ───────────────────
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 // ─── Запись об одной заметке ──────────────────────────────────────────
 export interface NoteRecord {
@@ -30,11 +30,26 @@ export interface NoteRecord {
     mode?: 'batch' | 'single';
 }
 
+// ─── Кластер из reduce-фазы глубокого аудита ──────────────────────────
+export interface ClusterRecord {
+    /** Название/тема кластера */
+    name: string;
+    /** Краткое описание темы (из reduce; может быть пустым) */
+    description: string;
+    /** Пути заметок кластера относительно корня хранилища */
+    filePaths: string[];
+}
+
 // ─── Структура файла индекса ──────────────────────────────────────────
 export interface NoteIndexData {
     version: number;
     updatedAt: string;
     notes: Record<string, NoteRecord>;
+    /** Результат последней кластеризации (перезаписывается каждым аудитом) */
+    clusters?: {
+        createdAt: string;
+        items: ClusterRecord[];
+    };
 }
 
 // ─── Статистика по набору файлов ─────────────────────────────────────
@@ -106,6 +121,19 @@ export class NoteIndexManager {
     set(path: string, record: NoteRecord): void {
         this.data.notes[path] = record;
         this.dirty = true;
+    }
+
+    // ── Кластеры ────────────────────────────────────────────────────
+    setClusters(items: ClusterRecord[]): void {
+        this.data.clusters = {
+            createdAt: new Date().toISOString(),
+            items,
+        };
+        this.dirty = true;
+    }
+
+    getClusters(): ClusterRecord[] {
+        return this.data.clusters?.items ?? [];
     }
 
     /** Удалить устаревшие пути (файлы которых больше нет) */
