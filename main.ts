@@ -1123,7 +1123,7 @@ export default class AIHubPlugin extends Plugin {
         progress.update(processed, errorCount);
         progress.logSuccess(file.name);
 
-        await new Promise((r) => setTimeout(r, BATCH_DELAY_MS));
+        await new Promise((r) => window.setTimeout(r, BATCH_DELAY_MS));
       } catch (err) {
         errorCount++;
         const msg = err instanceof Error ? err.message : String(err);

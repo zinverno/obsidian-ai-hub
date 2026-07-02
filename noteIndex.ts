@@ -73,7 +73,7 @@ export class NoteIndexManager {
     async load(): Promise<void> {
         try {
             const raw = await this.app.vault.adapter.read(this.indexPath);
-            const parsed: NoteIndexData = JSON.parse(raw);
+            const parsed = JSON.parse(raw) as NoteIndexData;
             if (parsed.version === SCHEMA_VERSION && parsed.notes) {
                 this.data = parsed;
             }
@@ -150,7 +150,7 @@ export class NoteIndexManager {
                 fresh++;
                 byQuality[rec.quality ?? 'draft']++;
                 const m = rec.mode ?? 'unknown';
-                byMode[m as keyof typeof byMode]++;
+                byMode[m]++;
             } else {
                 stale++;
             }
