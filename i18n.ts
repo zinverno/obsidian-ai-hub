@@ -32,9 +32,11 @@ export function t(key: string, vars?: Record<string, string | number>): string {
     s = EN[key] ?? RU[key] ?? key;
   }
   if (vars) {
-    for (const k of Object.keys(vars)) {
-      s = s.split(`{${k}}`).join(String(vars[k]));
-    }
+    // Один проход по шаблону: подставленные значения не пересканируются,
+    // поэтому литеральные "{n}"/"{links}" внутри значений не заменяются
+    s = s.replace(/\{(\w+)\}/g, (match, k: string) =>
+      Object.prototype.hasOwnProperty.call(vars, k) ? String(vars[k]) : match,
+    );
   }
   return s;
 }
@@ -97,6 +99,8 @@ const EN: Record<string, string> = {
   "Сгенерировать MOC из кластеров": "Generate MOCs from clusters",
   "Сначала запустите глубокий аудит": "Run a deep audit first",
   "Генерирую MOC...": "Generating MOCs...",
+  "Генерирую MOC {a}/{b}... (клик — отмена)": "Generating MOC {a}/{b}... (click to cancel)",
+  "Не удалось создать папку: {p}": "Failed to create folder: {p}",
   "✅ Создано MOC: {n}": "✅ MOCs created: {n}",
   "Папка для MOC-заметок": "Folder for MOC notes",
   "Куда складывать MOC, сгенерированные из кластеров аудита": "Where MOCs generated from audit clusters are stored",

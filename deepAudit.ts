@@ -227,8 +227,11 @@ export class DeepAuditEngine {
       throw new Error(tr("Не удалось проанализировать ни одного файла"));
     }
 
-    // 4. REDUCE-фаза: кластеризация (возможно иерархически)
-    const clusters = await this.runReducePhase(allSummaries);
+    // 4. REDUCE-фаза: кластеризация (возможно иерархически).
+    // Дедупликация одинаковых тем — здесь, одним местом на все пути reduce
+    const clusters = this.dedupeClusters(
+      await this.runReducePhase(allSummaries),
+    );
 
     // Сохраняем кластеры в индекс — их использует генератор MOC
     if (this.index) {
@@ -507,7 +510,7 @@ export class DeepAuditEngine {
 
     if (asString.length < 40000) {
       this.report("reducing", 1, 1, tr("Финальная кластеризация..."));
-      return this.dedupeClusters(await this.clusterize(compact));
+      return await this.clusterize(compact);
     }
 
     // Иерархическая свёртка: делим на группы, кластеризуем, потом мержим
@@ -541,7 +544,7 @@ export class DeepAuditEngine {
 
     // Финальный merge кластеров (рекурсивно уже не делаем — просто объединяем)
     const flat = partialClusters.flat();
-    if (flat.length <= 10) return this.dedupeClusters(flat);
+    if (flat.length <= 10) return flat;
 
     // Если кластеров слишком много — просим модель их объединить
     this.report(
@@ -550,7 +553,7 @@ export class DeepAuditEngine {
       groups.length,
       tr("Объединение кластеров..."),
     );
-    return this.dedupeClusters(await this.mergeClusters(flat));
+    return await this.mergeClusters(flat);
   }
 
   /**
@@ -561,8 +564,11 @@ export class DeepAuditEngine {
    */
   private dedupeClusters(clusters: ClusterSummary[]): ClusterSummary[] {
     const byName = new Map<string, ClusterSummary>();
+    let unnamed = 0;
     for (const c of clusters) {
-      const key = (c.name ?? "").trim().toLowerCase();
+      // Безымянные кластеры не сливаем между собой — у каждого свой ключ
+      const key =
+        (c.name ?? "").trim().toLowerCase() || ` unnamed-${unnamed++}`;
       const prev = byName.get(key);
       if (!prev) {
         byName.set(key, { ...c, filePaths: [...new Set(c.filePaths)] });
@@ -596,9 +602,13 @@ export class DeepAuditEngine {
     const parsed = extractJSON<{ clusters: ClusterSummary[] }>(response);
     const clusters = parsed.clusters || [];
 
-    // Достраиваем fileCount
+    // Достраиваем fileCount и страхуем обязательные поля (LLM может
+    // вернуть объект без name/description — дальше по коду это краш)
     return clusters.map((c) => ({
       ...c,
+      name: (c.name ?? "").trim(),
+      description: c.description ?? "",
+      suggestedMOC: c.suggestedMOC ?? "",
       fileCount: c.filePaths?.length ?? 0,
       filePaths: c.filePaths || [],
     }));
@@ -622,6 +632,9 @@ export class DeepAuditEngine {
     const parsed = extractJSON<{ clusters: ClusterSummary[] }>(response);
     return (parsed.clusters || []).map((c) => ({
       ...c,
+      name: (c.name ?? "").trim(),
+      description: c.description ?? "",
+      suggestedMOC: c.suggestedMOC ?? "",
       fileCount: c.filePaths?.length ?? 0,
       filePaths: c.filePaths || [],
     }));
