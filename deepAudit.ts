@@ -507,7 +507,7 @@ export class DeepAuditEngine {
 
     if (asString.length < 40000) {
       this.report("reducing", 1, 1, tr("Финальная кластеризация..."));
-      return await this.clusterize(compact);
+      return this.dedupeClusters(await this.clusterize(compact));
     }
 
     // Иерархическая свёртка: делим на группы, кластеризуем, потом мержим
@@ -541,7 +541,7 @@ export class DeepAuditEngine {
 
     // Финальный merge кластеров (рекурсивно уже не делаем — просто объединяем)
     const flat = partialClusters.flat();
-    if (flat.length <= 10) return flat;
+    if (flat.length <= 10) return this.dedupeClusters(flat);
 
     // Если кластеров слишком много — просим модель их объединить
     this.report(
@@ -550,7 +550,39 @@ export class DeepAuditEngine {
       groups.length,
       tr("Объединение кластеров..."),
     );
-    return await this.mergeClusters(flat);
+    return this.dedupeClusters(await this.mergeClusters(flat));
+  }
+
+  /**
+   * Детерминированное объединение кластеров с одинаковым именем.
+   * LLM-merge обеспечивает уникальность тем только промптом; здесь
+   * гарантия кодом: пути объединяются без дублей, из описаний берётся
+   * более содержательное.
+   */
+  private dedupeClusters(clusters: ClusterSummary[]): ClusterSummary[] {
+    const byName = new Map<string, ClusterSummary>();
+    for (const c of clusters) {
+      const key = (c.name ?? "").trim().toLowerCase();
+      const prev = byName.get(key);
+      if (!prev) {
+        byName.set(key, { ...c, filePaths: [...new Set(c.filePaths)] });
+        continue;
+      }
+      prev.filePaths = [...new Set([...prev.filePaths, ...c.filePaths])];
+      if (
+        (c.description ?? "").trim().length >
+        (prev.description ?? "").trim().length
+      ) {
+        prev.description = c.description;
+      }
+      if (!(prev.suggestedMOC ?? "").trim() && (c.suggestedMOC ?? "").trim()) {
+        prev.suggestedMOC = c.suggestedMOC;
+      }
+    }
+    return Array.from(byName.values()).map((c) => ({
+      ...c,
+      fileCount: c.filePaths.length,
+    }));
   }
 
   private async clusterize(data: unknown[]): Promise<ClusterSummary[]> {

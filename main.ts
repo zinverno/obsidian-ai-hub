@@ -1232,6 +1232,17 @@ export default class AIHubPlugin extends Plugin {
       /* уже есть */
     });
 
+    // Существующие md-файлы папки — поиск по нижнему регистру, чтобы не
+    // падать на create при регистронезависимой ФС (Windows/macOS)
+    const existingByLower = new Map<string, TFile>();
+    const folderPrefix = folder.toLowerCase() + "/";
+    for (const f of this.app.vault.getMarkdownFiles()) {
+      if (f.path.toLowerCase().startsWith(folderPrefix)) {
+        existingByLower.set(f.path.toLowerCase(), f);
+      }
+    }
+    const usedNames = new Set<string>();
+
     const notice = notify("loading", tr("Генерирую MOC..."));
     let created = 0;
     try {
@@ -1264,9 +1275,18 @@ export default class AIHubPlugin extends Plugin {
           links,
         });
 
-        const fileName = sanitizeMocFileName(cluster.name) || "MOC";
+        // Санитайзер мог схлопнуть разные темы в одно имя — суффикс -2, -3...
+        const base = sanitizeMocFileName(cluster.name) || "MOC";
+        let fileName = base;
+        for (let i = 2; usedNames.has(fileName.toLowerCase()); i++) {
+          fileName = `${base}-${i}`;
+        }
+        usedNames.add(fileName.toLowerCase());
+
         const path = normalizePath(`${folder}/${fileName}.md`);
-        const existing = this.app.vault.getAbstractFileByPath(path);
+        const existing =
+          existingByLower.get(path.toLowerCase()) ??
+          this.app.vault.getAbstractFileByPath(path);
         if (existing instanceof TFile) {
           await this.app.vault.modify(existing, content);
         } else {
