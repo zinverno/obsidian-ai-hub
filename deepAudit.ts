@@ -568,7 +568,7 @@ export class DeepAuditEngine {
     for (const c of clusters) {
       // Безымянные кластеры не сливаем между собой — у каждого свой ключ
       const key =
-        (c.name ?? "").trim().toLowerCase() || ` unnamed-${unnamed++}`;
+        (c.name ?? "").trim().toLowerCase() || ` unnamed-${unnamed++}`;
       const prev = byName.get(key);
       if (!prev) {
         byName.set(key, { ...c, filePaths: [...new Set(c.filePaths)] });
