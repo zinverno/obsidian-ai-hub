@@ -7,6 +7,7 @@ import {
   Menu,
   App,
   TFile,
+  TFolder,
   Setting,
   ButtonComponent,
   setIcon,
@@ -138,6 +139,14 @@ export default class AIHubPlugin extends Plugin {
         id: "ai-batch-process",
         name: tr("AI: Обработать несколько заметок"),
         callback: () => new BatchProcessModal(this.app, this).open(),
+      });
+
+      this.addCommand({
+        id: "ai-generate-mocs",
+        name: tr("Сгенерировать MOC из кластеров"),
+        callback: () => {
+          void this.generateMOCsFromClusters();
+        },
       });
 
       if (this.settings.showContextMenu) {
@@ -371,10 +380,7 @@ export default class AIHubPlugin extends Plugin {
       .map((c) => {
         const files = c.filePaths
           .slice(0, 20)
-          .map((p) => {
-            const basename = p.split("/").pop()?.replace(/\.md$/, "") ?? p;
-            return `  - [[${basename}]]`;
-          })
+          .map((p) => `  - ${noteToWikiLink(p)}`)
           .join("\n");
         const more =
           c.filePaths.length > 20
@@ -447,7 +453,7 @@ export default class AIHubPlugin extends Plugin {
       const nodeId = `cluster-${i}`;
       const fileList = cluster.filePaths
         .slice(0, 10)
-        .map((p) => `- [[${p.split("/").pop()?.replace(/\.md$/, "")}]]`)
+        .map((p) => `- ${noteToWikiLink(p)}`)
         .join("\n");
 
       nodes.push({
@@ -575,10 +581,13 @@ export default class AIHubPlugin extends Plugin {
         .trim()
         .replace(/\s+/g, "-") || "response";
 
-    const filename = (this.settings.filenameTemplate || "AI-{{date}}-{{topic}}")
-      .replace("{{date}}", dateStr)
-      .replace("{{time}}", timeStr)
-      .replace("{{topic}}", topicStr);
+    const filename =
+      sanitizeFileName(
+        (this.settings.filenameTemplate || "AI-{{date}}-{{topic}}")
+          .replace("{{date}}", dateStr)
+          .replace("{{time}}", timeStr)
+          .replace("{{topic}}", topicStr),
+      ) || "response";
 
     const path = normalizePath(
       folder ? `${folder}/${filename}.md` : `${filename}.md`,
@@ -1206,6 +1215,145 @@ export default class AIHubPlugin extends Plugin {
       new Notice(`❌ Ошибка: ${msg}`);
     }
   }
+
+  // === MOC из кластеров аудита ===
+  async generateMOCsFromClusters() {
+    const index = new NoteIndexManager(this.app);
+    await index.load();
+    const clusters = index.getClusters();
+    if (clusters.length === 0) {
+      new Notice(tr("Сначала запустите глубокий аудит"));
+      return;
+    }
+
+    // LLM понадобится только для кластеров без описания
+    if (clusters.some((c) => !(c.description ?? "").trim())) {
+      const err = validateSettings(this.settings);
+      if (err) {
+        new Notice(err);
+        return;
+      }
+    }
+
+    const folder = normalizePath(
+      this.settings.mocFolder.replace(/\/+$/, "") || "MOCs",
+    );
+    await this.app.vault.createFolder(folder).catch(() => {
+      /* уже есть */
+    });
+    // createFolder глотает и реальные ошибки (например, ФАЙЛ с таким
+    // именем) — проверяем результат явно, иначе упадёт первый же create
+    if (!(this.app.vault.getAbstractFileByPath(folder) instanceof TFolder)) {
+      notify("error", tr("Не удалось создать папку: {p}", { p: folder }));
+      return;
+    }
+
+    // Ключ пути: NFC + нижний регистр — совпадает с регистро- и
+    // формо-независимыми ФС (Windows, macOS с NFD-именами)
+    const pathKey = (p: string) => p.normalize("NFC").toLowerCase();
+    const existingByKey = new Map<string, TFile>();
+    const folderPrefix = pathKey(folder + "/");
+    for (const f of this.app.vault.getMarkdownFiles()) {
+      const k = pathKey(f.path);
+      if (k.startsWith(folderPrefix)) existingByKey.set(k, f);
+    }
+    // Перезаписываем только свои сгенерированные MOC — рукописные заметки
+    // пользователя с совпавшим именем получают суффикс, а не затираются
+    const isGeneratedMoc = (f: TFile) =>
+      this.app.metadataCache.getFileCache(f)?.frontmatter?.["type"] === "moc";
+    const usedKeys = new Set<string>();
+
+    const notice = notify("loading", tr("Генерирую MOC..."));
+    let cancelled = false;
+    notice.noticeEl.addEventListener("click", () => {
+      cancelled = true;
+    });
+
+    let created = 0;
+    const errors: string[] = [];
+    for (let ci = 0; ci < clusters.length; ci++) {
+      if (cancelled) break;
+      const cluster = clusters[ci];
+      const name = (cluster.name ?? "").trim();
+      const paths = cluster.filePaths ?? [];
+      notice.setMessage(
+        tr("Генерирую MOC {a}/{b}... (клик — отмена)", {
+          a: ci + 1,
+          b: clusters.length,
+        }),
+      );
+      // Ошибка одного кластера не обрывает остальные
+      try {
+        let desc = (cluster.description ?? "").trim();
+        if (!desc) {
+          // Описания из reduce нет — один запрос к LLM на кластер
+          desc = (
+            await callOpenRouter(
+              this.settings,
+              tr("@moc_desc_sys"),
+              tr("@moc_desc_user", {
+                name,
+                files: paths.slice(0, 30).join("\n"),
+              }),
+              { maxTokens: 200 },
+            )
+          ).trim();
+          await new Promise((r) => window.setTimeout(r, BATCH_DELAY_MS));
+        }
+
+        const links = paths.map((p) => `- ${noteToWikiLink(p)}`).join("\n");
+
+        // Свободное имя: занято в этом прогоне или чужой (не-MOC) файл
+        // на диске → суффикс -2, -3...
+        const base = sanitizeFileName(name) || "MOC";
+        let fileName = base;
+        let path = normalizePath(`${folder}/${fileName}.md`);
+        for (let i = 2; ; i++) {
+          const onDisk = existingByKey.get(pathKey(path));
+          if (!usedKeys.has(pathKey(path)) && (!onDisk || isGeneratedMoc(onDisk))) {
+            break;
+          }
+          fileName = `${base}-${i}`;
+          path = normalizePath(`${folder}/${fileName}.md`);
+        }
+        usedKeys.add(pathKey(path));
+
+        const content = tr("@moc_note", {
+          iso: new Date().toISOString(),
+          title: name || fileName,
+          desc,
+          n: paths.length,
+          links,
+        });
+
+        const existing = existingByKey.get(pathKey(path));
+        if (existing) {
+          await this.app.vault.modify(existing, content);
+        } else {
+          const nf = await this.app.vault.create(path, content);
+          existingByKey.set(pathKey(path), nf);
+        }
+        created++;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        errors.push(`${name || "?"}: ${msg}`);
+      }
+    }
+
+    notice.hide();
+    if (errors.length) {
+      notify(
+        "warning",
+        tr("✅ Готово! Успешно: {ok}, ошибок: {err}", {
+          ok: created,
+          err: errors.length,
+        }),
+      );
+      console.warn("[AI Hub] MOC errors:", errors);
+    } else {
+      notify("success", tr("✅ Создано MOC: {n}", { n: created }));
+    }
+  }
 }
 
 // === ПРОГРЕСС-МОДАЛКИ ===
@@ -1344,6 +1492,30 @@ function extractFlashcards(raw: string): string {
     })
     .join("\n")
     .trim();
+}
+
+// === ИМЕНА ФАЙЛОВ И ССЫЛКИ ===
+/**
+ * Единый санитайзер имени файла: срезает символы, запрещённые в именах
+ * файлов и ломающие вики-ссылки, схлопывает пробелы, ограничивает длину.
+ */
+function sanitizeFileName(name: string | undefined): string {
+  return (name ?? "")
+    .replace(/[\\/:*?"<>|#^[\]]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 80)
+    .trim();
+}
+
+/**
+ * Вики-ссылка на заметку по полному пути: цель однозначна даже при
+ * одинаковых именах в разных папках, отображается короткое имя.
+ */
+function noteToWikiLink(path: string): string {
+  const target = path.replace(/\.md$/, "");
+  const base = target.split("/").pop() || target;
+  return target === base ? `[[${target}]]` : `[[${target}|${base}]]`;
 }
 
 // === УВЕДОМЛЕНИЯ ===

@@ -227,8 +227,23 @@ export class DeepAuditEngine {
       throw new Error(tr("Не удалось проанализировать ни одного файла"));
     }
 
-    // 4. REDUCE-фаза: кластеризация (возможно иерархически)
-    const clusters = await this.runReducePhase(allSummaries);
+    // 4. REDUCE-фаза: кластеризация (возможно иерархически).
+    // Дедупликация одинаковых тем — здесь, одним местом на все пути reduce
+    const clusters = this.dedupeClusters(
+      await this.runReducePhase(allSummaries),
+    );
+
+    // Сохраняем кластеры в индекс — их использует генератор MOC
+    if (this.index) {
+      this.index.setClusters(
+        clusters.map((c) => ({
+          name: c.name,
+          description: c.description,
+          filePaths: c.filePaths,
+        })),
+      );
+      await this.index.save();
+    }
 
     // 5. Финальные инсайты и план
     const { globalInsights, actionPlan } = await this.runFinalSynthesis(
@@ -541,6 +556,41 @@ export class DeepAuditEngine {
     return await this.mergeClusters(flat);
   }
 
+  /**
+   * Детерминированное объединение кластеров с одинаковым именем.
+   * LLM-merge обеспечивает уникальность тем только промптом; здесь
+   * гарантия кодом: пути объединяются без дублей, из описаний берётся
+   * более содержательное.
+   */
+  private dedupeClusters(clusters: ClusterSummary[]): ClusterSummary[] {
+    const byName = new Map<string, ClusterSummary>();
+    let unnamed = 0;
+    for (const c of clusters) {
+      // Безымянные кластеры не сливаем между собой — у каждого свой ключ
+      const key =
+        (c.name ?? "").trim().toLowerCase() || ` unnamed-${unnamed++}`;
+      const prev = byName.get(key);
+      if (!prev) {
+        byName.set(key, { ...c, filePaths: [...new Set(c.filePaths)] });
+        continue;
+      }
+      prev.filePaths = [...new Set([...prev.filePaths, ...c.filePaths])];
+      if (
+        (c.description ?? "").trim().length >
+        (prev.description ?? "").trim().length
+      ) {
+        prev.description = c.description;
+      }
+      if (!(prev.suggestedMOC ?? "").trim() && (c.suggestedMOC ?? "").trim()) {
+        prev.suggestedMOC = c.suggestedMOC;
+      }
+    }
+    return Array.from(byName.values()).map((c) => ({
+      ...c,
+      fileCount: c.filePaths.length,
+    }));
+  }
+
   private async clusterize(data: unknown[]): Promise<ClusterSummary[]> {
     const user = tr("@cluster_user", { data: JSON.stringify(data, null, 0) });
     const response = await callOpenRouter(
@@ -552,9 +602,13 @@ export class DeepAuditEngine {
     const parsed = extractJSON<{ clusters: ClusterSummary[] }>(response);
     const clusters = parsed.clusters || [];
 
-    // Достраиваем fileCount
+    // Достраиваем fileCount и страхуем обязательные поля (LLM может
+    // вернуть объект без name/description — дальше по коду это краш)
     return clusters.map((c) => ({
       ...c,
+      name: (c.name ?? "").trim(),
+      description: c.description ?? "",
+      suggestedMOC: c.suggestedMOC ?? "",
       fileCount: c.filePaths?.length ?? 0,
       filePaths: c.filePaths || [],
     }));
@@ -578,6 +632,9 @@ export class DeepAuditEngine {
     const parsed = extractJSON<{ clusters: ClusterSummary[] }>(response);
     return (parsed.clusters || []).map((c) => ({
       ...c,
+      name: (c.name ?? "").trim(),
+      description: c.description ?? "",
+      suggestedMOC: c.suggestedMOC ?? "",
       fileCount: c.filePaths?.length ?? 0,
       filePaths: c.filePaths || [],
     }));

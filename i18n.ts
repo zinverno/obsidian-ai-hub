@@ -32,9 +32,11 @@ export function t(key: string, vars?: Record<string, string | number>): string {
     s = EN[key] ?? RU[key] ?? key;
   }
   if (vars) {
-    for (const k of Object.keys(vars)) {
-      s = s.split(`{${k}}`).join(String(vars[k]));
-    }
+    // Один проход по шаблону: подставленные значения не пересканируются,
+    // поэтому литеральные "{n}"/"{links}" внутри значений не заменяются
+    s = s.replace(/\{(\w+)\}/g, (match, k: string) =>
+      Object.prototype.hasOwnProperty.call(vars, k) ? String(vars[k]) : match,
+    );
   }
   return s;
 }
@@ -60,6 +62,9 @@ const RU: Record<string, string> = {
   "@batch_report": "# AI Batch Report\n\n📊 **Результат**\n- Успешно: {ok}\n- Ошибок: {err}\n- Backup: `{backup}/`\n",
   "@batch_errors": "\n## ⚠️ Ошибки\n{list}\n",
   "@flashcards_prompt": "Ты — генератор карточек для интервального повторения (плагин Spaced Repetition от st3v3nmw) в Obsidian. Тебе дан текст заметки. Составь по нему карточки для запоминания ключевых идей.\n\nФОРМАТ — САМОЕ ВАЖНОЕ:\nКаждая карточка — РОВНО ОДНА строка вида: текст вопроса::текст ответа\nРазделитель «::» стоит между вопросом и ответом НА ОДНОЙ СТРОКЕ. Слева от «::» — сам текст вопроса, справа — сам текст ответа. Слова-подписи «Вопрос», «Ответ», «Question», «Answer» писать ЗАПРЕЩЕНО.\n\nПРИМЕРЫ ПРАВИЛЬНЫХ КАРТОЧЕК (ровно так):\nЧто такое инкапсуляция::Сокрытие внутренней реализации объекта за публичным интерфейсом\nЗачем нужен индекс в базе данных::Он ускоряет поиск, избавляя от полного сканирования таблицы\nЧем поток отличается от процесса::Потоки делят память процесса, у процессов память изолирована\n\nПРИМЕР НЕПРАВИЛЬНОГО ОТВЕТА (так НЕЛЬЗЯ — вопрос и ответ разнесены по строкам с подписями):\nВопрос::Что такое инкапсуляция\nОтвет::Сокрытие внутренней реализации\n\nТРЕБОВАНИЯ:\n- 3-7 карточек в зависимости от объёма заметки, по ключевым идеям.\n- Ответ короткий: 1-2 предложения.\n- Все карточки на языке заметки. ОДИН язык во всём ответе, без вставок на других языках.\n\nЗАПРЕЩЕНО:\n- Разносить вопрос и ответ по разным строкам.\n- Нумерация, маркеры списка, дефисы в начале строк.\n- Markdown: блоки кода, заголовки, жирный/курсив.\n- Вступления и комментарии («Вот ваши карточки:» и т.п.).\n- Пустые строки между карточками.\nВерни ТОЛЬКО строки карточек.",
+  "@moc_note": "---\ntype: moc\ndate: {iso}\n---\n\n# {title}\n\n{desc}\n\n## Заметки ({n})\n\n{links}\n",
+  "@moc_desc_sys": "Ты — помощник по базе знаний Obsidian. Напиши краткое описание темы кластера заметок: 1-2 предложения, по сути, без воды. Верни ТОЛЬКО текст описания, без пояснений, кавычек и заголовков. Отвечай на русском.",
+  "@moc_desc_user": "Тема кластера: {name}\n\nФайлы кластера:\n{files}\n\nНапиши 1-2 предложения о том, что объединяет эти заметки.",
 };
 
 const EN: Record<string, string> = {
@@ -83,11 +88,22 @@ const EN: Record<string, string> = {
   "@batch_report": "# AI Batch Report\n\n📊 **Result**\n- Succeeded: {ok}\n- Errors: {err}\n- Backup: `{backup}/`\n",
   "@batch_errors": "\n## ⚠️ Errors\n{list}\n",
   "@flashcards_prompt": "You are a flashcard generator for the Spaced Repetition plugin (by st3v3nmw) in Obsidian. You are given the text of a note. Create flashcards for its key ideas.\n\nFORMAT — MOST IMPORTANT:\nEach card is EXACTLY ONE line of the form: question text::answer text\nThe \"::\" separator sits between the question and the answer ON THE SAME LINE. Left of \"::\" is the question text itself, right of it is the answer text itself. Label words such as \"Question\", \"Answer\", \"Вопрос\", \"Ответ\" are FORBIDDEN.\n\nEXAMPLES OF CORRECT CARDS (exactly like this):\nWhat is encapsulation::Hiding an object's internal implementation behind a public interface\nWhy use a database index::It speeds up lookups by avoiding full table scans\nHow does a thread differ from a process::Threads share the process memory, processes are isolated\n\nWRONG EXAMPLE (never do this — question and answer split across lines with labels):\nQuestion::What is encapsulation\nAnswer::Hiding the internal implementation\n\nREQUIREMENTS:\n- 3-7 cards depending on the note's size, covering the key ideas.\n- Keep answers short: 1-2 sentences.\n- Write all cards in the language of the note. ONE language throughout, no mixed-language insertions.\n\nFORBIDDEN:\n- Splitting a question and its answer onto separate lines.\n- Numbering, list bullets, leading dashes.\n- Markdown: code blocks, headings, bold/italics.\n- Intros or comments (\"Here are your cards:\" etc.).\n- Blank lines between cards.\nReturn ONLY the card lines.",
+  "@moc_note": "---\ntype: moc\ndate: {iso}\n---\n\n# {title}\n\n{desc}\n\n## Notes ({n})\n\n{links}\n",
+  "@moc_desc_sys": "You are an Obsidian knowledge-base assistant. Write a short description of a note cluster's topic: 1-2 sentences, to the point. Return ONLY the description text — no explanations, quotes or headings. Reply in English.",
+  "@moc_desc_user": "Cluster topic: {name}\n\nCluster files:\n{files}\n\nWrite 1-2 sentences about what unites these notes.",
   "Флешкарты": "Flashcards",
   "Интервальное повторение": "Spaced repetition",
   "Сгенерировать флешкарты для текущей заметки": "Generate flashcards for the current note",
   "Генерирую флешкарты...": "Generating flashcards...",
   "✅ Создано флешкарт: {n}": "✅ Flashcards created: {n}",
+  "Сгенерировать MOC из кластеров": "Generate MOCs from clusters",
+  "Сначала запустите глубокий аудит": "Run a deep audit first",
+  "Генерирую MOC...": "Generating MOCs...",
+  "Генерирую MOC {a}/{b}... (клик — отмена)": "Generating MOC {a}/{b}... (click to cancel)",
+  "Не удалось создать папку: {p}": "Failed to create folder: {p}",
+  "✅ Создано MOC: {n}": "✅ MOCs created: {n}",
+  "Папка для MOC-заметок": "Folder for MOC notes",
+  "Куда складывать MOC, сгенерированные из кластеров аудита": "Where MOCs generated from audit clusters are stored",
   " · Бесплатные модели доступны без баланса": " · Free models work without a balance",
   "Показать актуальные бесплатные модели": "Show current free models",
   "## Итог": "## Summary",
