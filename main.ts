@@ -1,4 +1,4 @@
-import { t as tr, setLanguage, dateLocale } from "./i18n";
+import { t as tr, tAll, setLanguage, dateLocale } from "./i18n";
 import {
   Plugin,
   Notice,
@@ -45,6 +45,9 @@ import {
   SingleAuditEngine,
   SingleAuditProgressModal,
   SingleAuditReport,
+  extractJSON,
+  smartTruncate,
+  withRetry,
 } from "./deepAudit";
 import { NoteIndexManager } from "./noteIndex";
 
@@ -146,6 +149,14 @@ export default class AIHubPlugin extends Plugin {
         name: tr("Сгенерировать MOC из кластеров"),
         callback: () => {
           void this.generateMOCsFromClusters();
+        },
+      });
+
+      this.addCommand({
+        id: "ai-atomize-note",
+        name: tr("Разбить заметку на атомарные"),
+        editorCallback: (_e, view) => {
+          if (view.file) void this.atomizeNote(view.file);
         },
       });
 
@@ -818,6 +829,15 @@ export default class AIHubPlugin extends Plugin {
             if (file) void this.generateFlashcardsForNote(file);
           }),
       );
+      submenu.addItem((sub) =>
+        sub
+          .setTitle(tr("Разбить заметку на атомарные"))
+          .setIcon("git-fork")
+          .onClick(() => {
+            const file = this.app.workspace.getActiveFile();
+            if (file) void this.atomizeNote(file);
+          }),
+      );
     });
   }
 
@@ -1188,7 +1208,10 @@ export default class AIHubPlugin extends Plugin {
     const raw = await callOpenRouter(this.settings, prompt, content);
     const cards = extractFlashcards(raw);
     if (!cards) throw new Error(tr("Некорректный ответ AI"));
-    const newContent = `${content.replace(/\s+$/, "")}\n\n## Flashcards\n#flashcards\n\n${cards}\n`;
+    const newContent = appendSection(
+      content,
+      `## Flashcards\n#flashcards\n\n${cards}`,
+    );
     return { newContent, cardCount: cards.split("\n").length };
   }
 
@@ -1216,6 +1239,49 @@ export default class AIHubPlugin extends Plugin {
     }
   }
 
+  // === Общие хелперы создания файлов (MOC, атомы) ===
+
+  /**
+   * Гарантирует существование папки. createFolder глотает и реальные
+   * ошибки (например, ФАЙЛ с таким именем) — проверяем результат явно,
+   * иначе упадёт первый же create.
+   */
+  private async ensureFolder(folder: string): Promise<boolean> {
+    await this.app.vault.createFolder(folder).catch(() => {
+      /* уже есть */
+    });
+    return this.app.vault.getAbstractFileByPath(folder) instanceof TFolder;
+  }
+
+  /** md-файлы папки (прямые дети) по нормализованному ключу пути */
+  private mdFilesIn(folder: string): Map<string, TFile> {
+    const map = new Map<string, TFile>();
+    const root = folder
+      ? this.app.vault.getAbstractFileByPath(folder)
+      : this.app.vault.getRoot();
+    if (root instanceof TFolder) {
+      for (const child of root.children) {
+        if (child instanceof TFile && child.extension === "md") {
+          map.set(pathKey(child.path), child);
+        }
+      }
+    }
+    return map;
+  }
+
+  /** Свободный путь в папке: base.md, base-2.md, base-3.md... */
+  private findFreePath(
+    base: string,
+    folder: string,
+    isTaken: (key: string) => boolean,
+  ): string {
+    let path = normalizePath(`${folder}/${base}.md`);
+    for (let i = 2; isTaken(pathKey(path)); i++) {
+      path = normalizePath(`${folder}/${base}-${i}.md`);
+    }
+    return path;
+  }
+
   // === MOC из кластеров аудита ===
   async generateMOCsFromClusters() {
     const index = new NoteIndexManager(this.app);
@@ -1238,25 +1304,12 @@ export default class AIHubPlugin extends Plugin {
     const folder = normalizePath(
       this.settings.mocFolder.replace(/\/+$/, "") || "MOCs",
     );
-    await this.app.vault.createFolder(folder).catch(() => {
-      /* уже есть */
-    });
-    // createFolder глотает и реальные ошибки (например, ФАЙЛ с таким
-    // именем) — проверяем результат явно, иначе упадёт первый же create
-    if (!(this.app.vault.getAbstractFileByPath(folder) instanceof TFolder)) {
+    if (!(await this.ensureFolder(folder))) {
       notify("error", tr("Не удалось создать папку: {p}", { p: folder }));
       return;
     }
 
-    // Ключ пути: NFC + нижний регистр — совпадает с регистро- и
-    // формо-независимыми ФС (Windows, macOS с NFD-именами)
-    const pathKey = (p: string) => p.normalize("NFC").toLowerCase();
-    const existingByKey = new Map<string, TFile>();
-    const folderPrefix = pathKey(folder + "/");
-    for (const f of this.app.vault.getMarkdownFiles()) {
-      const k = pathKey(f.path);
-      if (k.startsWith(folderPrefix)) existingByKey.set(k, f);
-    }
+    const existingByKey = this.mdFilesIn(folder);
     // Перезаписываем только свои сгенерированные MOC — рукописные заметки
     // пользователя с совпавшим именем получают суффикс, а не затираются
     const isGeneratedMoc = (f: TFile) =>
@@ -1306,21 +1359,16 @@ export default class AIHubPlugin extends Plugin {
         // Свободное имя: занято в этом прогоне или чужой (не-MOC) файл
         // на диске → суффикс -2, -3...
         const base = sanitizeFileName(name) || "MOC";
-        let fileName = base;
-        let path = normalizePath(`${folder}/${fileName}.md`);
-        for (let i = 2; ; i++) {
-          const onDisk = existingByKey.get(pathKey(path));
-          if (!usedKeys.has(pathKey(path)) && (!onDisk || isGeneratedMoc(onDisk))) {
-            break;
-          }
-          fileName = `${base}-${i}`;
-          path = normalizePath(`${folder}/${fileName}.md`);
-        }
+        const path = this.findFreePath(base, folder, (key) => {
+          if (usedKeys.has(key)) return true;
+          const onDisk = existingByKey.get(key);
+          return onDisk !== undefined && !isGeneratedMoc(onDisk);
+        });
         usedKeys.add(pathKey(path));
 
         const content = tr("@moc_note", {
           iso: new Date().toISOString(),
-          title: name || fileName,
+          title: name || base,
           desc,
           n: paths.length,
           links,
@@ -1352,6 +1400,138 @@ export default class AIHubPlugin extends Plugin {
       console.warn("[AI Hub] MOC errors:", errors);
     } else {
       notify("success", tr("✅ Создано MOC: {n}", { n: created }));
+    }
+  }
+
+  // === Атомизация заметки (Zettelkasten) ===
+  async atomizeNote(file: TFile) {
+    const err = validateSettings(this.settings);
+    if (err) {
+      new Notice(err);
+      return;
+    }
+
+    const content = await this.app.vault.read(file);
+
+    // Секция уже есть (на любом языке интерфейса) — не дублируем.
+    // Варианты заголовка берутся из словарей i18n, а не из литералов
+    const hasAtomSection = (text: string) =>
+      tAll("## Атомарные заметки").some((h) => text.includes(h));
+    if (hasAtomSection(content)) {
+      new Notice(tr("Атомы уже создавались для этой заметки"));
+      return;
+    }
+
+    // Целевая папка: рядом с оригиналом (дефолт) или общая папка
+    let folder: string;
+    if (this.settings.atomsLocation === "folder") {
+      folder = normalizePath(
+        this.settings.atomsFolder.replace(/\/+$/, "") || "Atoms",
+      );
+      if (!(await this.ensureFolder(folder))) {
+        notify("error", tr("Не удалось создать папку: {p}", { p: folder }));
+        return;
+      }
+    } else {
+      const parent = file.parent?.path ?? "";
+      folder = parent === "/" ? "" : parent;
+    }
+
+    const notice = notify("loading", tr("Разбиваю на атомы..."));
+    try {
+      // Ретрай на случай битого JSON/хвостового текста от модели;
+      // контент режем, как остальные LLM-пути плагина
+      const atomsRaw = await withRetry(
+        async () => {
+          const response = await callOpenRouter(
+            this.settings,
+            tr("@atomize_prompt"),
+            smartTruncate(content, STREAM_CONTEXT_MAX_CHARS),
+            { maxTokens: MAX_TOKENS_AUDIT },
+          );
+          const parsed = extractJSON<
+            | { atoms?: Array<{ title?: string; body?: string }> }
+            | Array<{ title?: string; body?: string }>
+          >(response);
+          // Модель может вернуть голый массив вместо {"atoms": [...]}
+          return Array.isArray(parsed) ? parsed : (parsed.atoms ?? []);
+        },
+        1,
+        new AbortController().signal,
+      );
+      const atoms = atomsRaw
+        .map((a) => ({
+          title: (a?.title ?? "").replace(/\s+/g, " ").trim(),
+          body: (a?.body ?? "").trim(),
+        }))
+        .filter((a) => a.title && a.body);
+
+      if (atoms.length === 0) {
+        notice.hide();
+        new Notice(tr("Заметка уже атомарна"));
+        return;
+      }
+
+      // Занятые имена в целевой папке
+      const taken = new Set(this.mdFilesIn(folder).keys());
+
+      const createdPaths: string[] = [];
+      const errors: string[] = [];
+      for (const atom of atoms) {
+        // Ошибка одного атома не обрывает остальные
+        try {
+          const base = sanitizeFileName(atom.title) || "Atom";
+          const path = this.findFreePath(base, folder, (key) =>
+            taken.has(key),
+          );
+          taken.add(pathKey(path));
+
+          const atomContent = tr("@atom_note", {
+            iso: new Date().toISOString(),
+            title: atom.title,
+            body: atom.body,
+          });
+          await this.app.vault.create(path, atomContent);
+          createdPaths.push(path);
+        } catch (e) {
+          errors.push(
+            `${atom.title}: ${e instanceof Error ? e.message : String(e)}`,
+          );
+        }
+      }
+
+      if (createdPaths.length > 0) {
+        // Дописываем секцию ссылок в конец оригинала; текст не трогаем.
+        // Перечитываем файл — пользователь мог править его, пока думал LLM
+        const fresh = await this.app.vault.read(file);
+        if (!hasAtomSection(fresh)) {
+          const links = createdPaths
+            .map((p) => `- ${noteToWikiLink(p)}`)
+            .join("\n");
+          await this.app.vault.modify(
+            file,
+            appendSection(fresh, `${tr("## Атомарные заметки")}\n\n${links}`),
+          );
+        }
+      }
+
+      notice.hide();
+      if (errors.length) {
+        notify(
+          "warning",
+          tr("✅ Готово! Успешно: {ok}, ошибок: {err}", {
+            ok: createdPaths.length,
+            err: errors.length,
+          }),
+        );
+        console.warn("[AI Hub] Atomize errors:", errors);
+      } else {
+        notify("success", tr("✅ Создано атомов: {n}", { n: createdPaths.length }));
+      }
+    } catch (err) {
+      notice.hide();
+      const msg = err instanceof Error ? err.message : String(err);
+      new Notice(`❌ Ошибка: ${msg}`);
     }
   }
 }
@@ -1516,6 +1696,22 @@ function noteToWikiLink(path: string): string {
   const target = path.replace(/\.md$/, "");
   const base = target.split("/").pop() || target;
   return target === base ? `[[${target}]]` : `[[${target}|${base}]]`;
+}
+
+/**
+ * Ключ пути: NFC + нижний регистр — совпадает с регистро- и
+ * формо-независимыми ФС (Windows, macOS с NFD-именами).
+ */
+function pathKey(p: string): string {
+  return p.normalize("NFC").toLowerCase();
+}
+
+/**
+ * Дописывает блок отдельной секцией в конец заметки,
+ * не трогая основной текст.
+ */
+function appendSection(content: string, block: string): string {
+  return `${content.replace(/\s+$/, "")}\n\n${block}\n`;
 }
 
 // === УВЕДОМЛЕНИЯ ===

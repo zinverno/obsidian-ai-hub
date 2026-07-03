@@ -24,6 +24,18 @@ export function dateLocale(): string {
   return resolved === "ru" ? "ru-RU" : "en-US";
 }
 
+/**
+ * Все языковые варианты перевода ключа (сам ключ — русский вариант).
+ * Для языконезависимых проверок: например, найден ли в тексте заголовок,
+ * который могла вставить любая локаль.
+ */
+export function tAll(key: string): string[] {
+  const variants = new Set<string>([key]);
+  if (RU[key]) variants.add(RU[key]);
+  if (EN[key]) variants.add(EN[key]);
+  return [...variants];
+}
+
 export function t(key: string, vars?: Record<string, string | number>): string {
   let s: string;
   if (resolved === "ru") {
@@ -65,6 +77,8 @@ const RU: Record<string, string> = {
   "@moc_note": "---\ntype: moc\ndate: {iso}\n---\n\n# {title}\n\n{desc}\n\n## Заметки ({n})\n\n{links}\n",
   "@moc_desc_sys": "Ты — помощник по базе знаний Obsidian. Напиши краткое описание темы кластера заметок: 1-2 предложения, по сути, без воды. Верни ТОЛЬКО текст описания, без пояснений, кавычек и заголовков. Отвечай на русском.",
   "@moc_desc_user": "Тема кластера: {name}\n\nФайлы кластера:\n{files}\n\nНапиши 1-2 предложения о том, что объединяет эти заметки.",
+  "@atomize_prompt": "Ты — помощник по методу Zettelkasten в Obsidian. Тебе дан текст заметки. Выдели из него АТОМАРНЫЕ идеи — самостоятельные мысли, каждая из которых заслуживает отдельной заметки.\n\nФОРМАТ ОТВЕТА — СТРОГО валидный JSON, без Markdown-обёрток, без комментариев, без текста вокруг:\n{\"atoms\": [{\"title\": \"суть идеи одной короткой фразой\", \"body\": \"развёрнутое изложение этой одной идеи, 2-6 предложений\"}]}\n\nПРАВИЛА:\n- Каждый атом — РОВНО ОДНА идея: title передаёт суть, body раскрывает только её.\n- title — короткая фраза без Markdown и без символов \\ / : * ? \" < > | # ^ [ ].\n- body — связный самодостаточный текст, понятный без исходной заметки. Markdown в body допустим.\n- 2-8 атомов; не дроби искусственно ради количества.\n- Если заметка уже атомарна (одна идея) или дробить нечего — верни {\"atoms\": []}.\n- Пиши на русском языке.\nОтвет — ТОЛЬКО JSON.",
+  "@atom_note": "---\ntype: atom\ndate: {iso}\n---\n\n# {title}\n\n{body}\n",
 };
 
 const EN: Record<string, string> = {
@@ -91,6 +105,8 @@ const EN: Record<string, string> = {
   "@moc_note": "---\ntype: moc\ndate: {iso}\n---\n\n# {title}\n\n{desc}\n\n## Notes ({n})\n\n{links}\n",
   "@moc_desc_sys": "You are an Obsidian knowledge-base assistant. Write a short description of a note cluster's topic: 1-2 sentences, to the point. Return ONLY the description text — no explanations, quotes or headings. Reply in English.",
   "@moc_desc_user": "Cluster topic: {name}\n\nCluster files:\n{files}\n\nWrite 1-2 sentences about what unites these notes.",
+  "@atomize_prompt": "You are a Zettelkasten assistant in Obsidian. You are given the text of a note. Extract its ATOMIC ideas — self-contained thoughts, each deserving its own note.\n\nRESPONSE FORMAT — STRICTLY valid JSON, no Markdown wrappers, no comments, no surrounding text:\n{\"atoms\": [{\"title\": \"the gist of the idea in one short phrase\", \"body\": \"a fuller write-up of that single idea, 2-6 sentences\"}]}\n\nRULES:\n- Each atom is EXACTLY ONE idea: the title captures the gist, the body elaborates only on it.\n- title — a short phrase without Markdown and without the characters \\ / : * ? \" < > | # ^ [ ].\n- body — coherent, self-contained text that makes sense without the source note. Markdown is allowed in the body.\n- 2-8 atoms; do not split artificially just to increase the count.\n- If the note is already atomic (a single idea) or there is nothing to split — return {\"atoms\": []}.\n- Write in English.\nRespond with JSON ONLY.",
+  "@atom_note": "---\ntype: atom\ndate: {iso}\n---\n\n# {title}\n\n{body}\n",
   "Флешкарты": "Flashcards",
   "Интервальное повторение": "Spaced repetition",
   "Сгенерировать флешкарты для текущей заметки": "Generate flashcards for the current note",
@@ -101,6 +117,18 @@ const EN: Record<string, string> = {
   "Генерирую MOC...": "Generating MOCs...",
   "Генерирую MOC {a}/{b}... (клик — отмена)": "Generating MOC {a}/{b}... (click to cancel)",
   "Не удалось создать папку: {p}": "Failed to create folder: {p}",
+  "Разбить заметку на атомарные": "Split note into atomic notes",
+  "Разбиваю на атомы...": "Splitting into atomic notes...",
+  "Заметка уже атомарна": "The note is already atomic",
+  "Атомы уже создавались для этой заметки": "Atoms were already created for this note",
+  "✅ Создано атомов: {n}": "✅ Atomic notes created: {n}",
+  "## Атомарные заметки": "## Atomic notes",
+  "Куда складывать атомарные заметки": "Where to put atomic notes",
+  "Рядом — сохраняет тематический контекст папки оригинала": "Next to the original keeps the folder's thematic context",
+  "Рядом с оригиналом": "Next to the original",
+  "В общую папку": "Into a shared folder",
+  "Папка для атомарных заметок": "Folder for atomic notes",
+  "Используется только в режиме «В общую папку»": "Used only in the “shared folder” mode",
   "✅ Создано MOC: {n}": "✅ MOCs created: {n}",
   "Папка для MOC-заметок": "Folder for MOC notes",
   "Куда складывать MOC, сгенерированные из кластеров аудита": "Where MOCs generated from audit clusters are stored",
