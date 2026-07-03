@@ -83,7 +83,7 @@ const FINAL_INSIGHTS_PROMPT = () => tr("@final_sys");
  * Умная обрезка Markdown-контента: сохраняет frontmatter целиком,
  * затем распределяет бюджет символов по секциям заголовков.
  */
-function smartTruncate(content: string, maxChars: number): string {
+export function smartTruncate(content: string, maxChars: number): string {
   if (content.length <= maxChars) return content;
 
   // Всегда сохраняем frontmatter целиком
@@ -142,10 +142,20 @@ export function extractJSON<T>(raw: string): T {
     throw new Error(tr("JSON не найден в ответе модели"));
 
   const jsonStr = cleaned.slice(jsonStart);
-  return JSON.parse(jsonStr) as T;
+  try {
+    return JSON.parse(jsonStr) as T;
+  } catch (err) {
+    // Модель могла дописать текст после JSON — срезаем хвост
+    const lastBrace = Math.max(
+      jsonStr.lastIndexOf("}"),
+      jsonStr.lastIndexOf("]"),
+    );
+    if (lastBrace === -1) throw err;
+    return JSON.parse(jsonStr.slice(0, lastBrace + 1)) as T;
+  }
 }
 
-async function withRetry<T>(
+export async function withRetry<T>(
   fn: () => Promise<T>,
   retries: number,
   signal: AbortSignal,

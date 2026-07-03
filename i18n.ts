@@ -24,6 +24,18 @@ export function dateLocale(): string {
   return resolved === "ru" ? "ru-RU" : "en-US";
 }
 
+/**
+ * Все языковые варианты перевода ключа (сам ключ — русский вариант).
+ * Для языконезависимых проверок: например, найден ли в тексте заголовок,
+ * который могла вставить любая локаль.
+ */
+export function tAll(key: string): string[] {
+  const variants = new Set<string>([key]);
+  if (RU[key]) variants.add(RU[key]);
+  if (EN[key]) variants.add(EN[key]);
+  return [...variants];
+}
+
 export function t(key: string, vars?: Record<string, string | number>): string {
   let s: string;
   if (resolved === "ru") {
