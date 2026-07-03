@@ -128,7 +128,7 @@ function smartTruncate(content: string, maxChars: number): string {
   return result;
 }
 
-function extractJSON<T>(raw: string): T {
+export function extractJSON<T>(raw: string): T {
   // Убираем markdown-обёртку если есть
   const cleaned = raw
     .replace(/```json\n?/gi, "")

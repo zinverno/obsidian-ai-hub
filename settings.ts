@@ -31,6 +31,10 @@ export interface AIHubSettings {
   filenameTemplate: string;
   /** Папка для MOC-заметок, генерируемых из кластеров аудита */
   mocFolder: string;
+  /** Куда складывать атомарные заметки: рядом с оригиналом или в общую папку */
+  atomsLocation: "same" | "folder";
+  /** Папка для атомарных заметок (используется в режиме "folder") */
+  atomsFolder: string;
   // ── Интерфейс ─────────────────────────────────────────────────────
   showContextMenu: boolean;
   notifyOnCopy: boolean;
@@ -54,6 +58,8 @@ export const DEFAULT_SETTINGS: AIHubSettings = {
   newNoteFolder: "",
   filenameTemplate: "AI-{{date}}-{{topic}}",
   mocFolder: "MOCs/",
+  atomsLocation: "same",
+  atomsFolder: "Atoms/",
   showContextMenu: true,
   notifyOnCopy: true,
   language: "auto",
@@ -640,6 +646,40 @@ export class AIHubSettingTab extends PluginSettingTab {
             });
         }),
       "map",
+    );
+
+    this.addIcon(
+      new Setting(el)
+        .setName(tr("Куда складывать атомарные заметки"))
+        .setDesc(tr("Рядом — сохраняет тематический контекст папки оригинала"))
+        .addDropdown((d) =>
+          d
+            .addOption("same", tr("Рядом с оригиналом"))
+            .addOption("folder", tr("В общую папку"))
+            .setValue(this.plugin.settings.atomsLocation)
+            .onChange(async (v) => {
+              this.plugin.settings.atomsLocation = v as "same" | "folder";
+              await save();
+            }),
+        ),
+      "git-fork",
+    );
+
+    this.addIcon(
+      new Setting(el)
+        .setName(tr("Папка для атомарных заметок"))
+        .setDesc(tr("Используется только в режиме «В общую папку»"))
+        .addText((t) => {
+          t.inputEl.setAttribute("aria-label", tr("Папка для атомарных заметок"));
+          return t
+            .setPlaceholder("Atoms/")
+            .setValue(this.plugin.settings.atomsFolder)
+            .onChange(async (v) => {
+              this.plugin.settings.atomsFolder = v.trim();
+              await save();
+            });
+        }),
+      "atom",
     );
 
     this.addIcon(
