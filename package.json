@@ -1,6 +1,6 @@
 {
   "name": "obsidian-ai-hub",
-  "version": "1.0.0",
+  "version": "1.4.0",
   "description": "AI Hub for Obsidian",
   "main": "main.js",
   "scripts": {
