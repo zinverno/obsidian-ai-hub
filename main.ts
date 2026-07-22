@@ -64,6 +64,21 @@ interface VaultAuditStats {
 export default class AIHubPlugin extends Plugin {
   settings: AIHubSettings;
   lastPrompt = "";
+  private noteIndexPromise: Promise<NoteIndexManager> | null = null;
+
+  /**
+   * Единственный на плагин экземпляр индекса: загружается с диска один раз,
+   * лениво. Кэширование промиса даёт single-flight — параллельные вызовы
+   * получают тот же экземпляр и одну загрузку, поэтому нет двух менеджеров,
+   * перезаписывающих note-index.json друг поверх друга.
+   */
+  getIndex(): Promise<NoteIndexManager> {
+    if (!this.noteIndexPromise) {
+      const mgr = new NoteIndexManager(this.app);
+      this.noteIndexPromise = mgr.load().then(() => mgr);
+    }
+    return this.noteIndexPromise;
+  }
 
   async onload() {
     try {
@@ -250,8 +265,7 @@ export default class AIHubPlugin extends Plugin {
     if (!confirmed) return;
 
     // Запускаем
-    const index = new NoteIndexManager(this.app);
-    await index.load();
+    const index = await this.getIndex();
     const engine = new DeepAuditEngine(this.app, this.settings, config, index);
     const progressModal = new DeepAuditProgressModal(this.app);
     progressModal.attachEngine(engine);
@@ -1284,8 +1298,7 @@ export default class AIHubPlugin extends Plugin {
 
   // === MOC из кластеров аудита ===
   async generateMOCsFromClusters() {
-    const index = new NoteIndexManager(this.app);
-    await index.load();
+    const index = await this.getIndex();
     const clusters = index.getClusters();
     if (clusters.length === 0) {
       new Notice(tr("Сначала запустите глубокий аудит"));
@@ -2331,7 +2344,8 @@ export class BatchProcessModal extends Modal {
 //  Модальное окно выбора режима аудита
 // ─────────────────────────────────────────────────────────────────────
 class AuditModeModal extends Modal {
-  private index: NoteIndexManager;
+  // Присваивается в onOpen из общего экземпляра плагина
+  private index!: NoteIndexManager;
   private files: TFile[] = [];
   private statsEl: HTMLElement | null = null;
 
@@ -2340,7 +2354,6 @@ class AuditModeModal extends Modal {
     private plugin: AIHubPlugin,
   ) {
     super(app);
-    this.index = new NoteIndexManager(app);
   }
 
   async onOpen() {
@@ -2359,8 +2372,8 @@ class AuditModeModal extends Modal {
       text: tr("Каждый режим оптимизирован под свою задачу"),
     });
 
-    // Загружаем индекс и считаем статистику
-    await this.index.load();
+    // Берём общий экземпляр индекса плагина (уже загружен) и считаем статистику
+    this.index = await this.plugin.getIndex();
     this.files = this.app.vault.getMarkdownFiles().filter((f) => {
       const p = f.path.toLowerCase();
       const cfg = this.app.vault.configDir.toLowerCase() + "/";
