@@ -14,7 +14,7 @@ async function main() {
     minifyIdentifiers: production,
     platform: 'node',
     format: 'cjs',
-    sourcemap: 'inline',
+    sourcemap: production ? false : 'inline',
     outfile: 'main.js',
     target: 'ES2020',
     define: {
