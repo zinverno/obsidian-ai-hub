@@ -1102,3 +1102,4 @@
 .ai-hub-test-row { margin-top: 12px; display: flex; align-items: center; gap: 12px; }
 .ai-hub-test-btn { padding: 6px 14px; border-radius: 8px; border: 1px solid var(--background-modifier-border); font-size: 0.85em; cursor: pointer; background: var(--background-secondary); color: var(--text-normal); display: flex; align-items: center; gap: 6px; transition: all 0.15s; font-weight: 500; }
 .ai-hub-conn-status { font-size: 0.82em; color: var(--ai-status-color, var(--text-muted)); }
+.ai-hub-embedding-status { white-space: pre-line; line-height: 1.45; }
