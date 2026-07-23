@@ -50,6 +50,8 @@ import {
   withRetry,
 } from "./deepAudit";
 import { NoteIndexManager } from "./noteIndex";
+import { mergeEmbeddingSettings } from "./embeddings/types";
+import type { StoredEmbeddingSettings } from "./embeddings/types";
 
 type Mode = "simple" | "selection" | "vault";
 
@@ -190,8 +192,13 @@ export default class AIHubPlugin extends Plugin {
     }
   }
   async loadSettings() {
-    const data = (await this.loadData()) as Partial<AIHubSettings> | null;
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, data);
+    type StoredAIHubSettings = Omit<Partial<AIHubSettings>, "semantic"> & {
+      semantic?: StoredEmbeddingSettings;
+    };
+    const data = (await this.loadData()) as StoredAIHubSettings | null;
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, data, {
+      semantic: mergeEmbeddingSettings(data?.semantic),
+    });
 
     // Миграция: если provider не задан — определяем по baseUrl
     if (!data?.provider && this.settings.baseUrl) {

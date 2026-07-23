@@ -7,6 +7,15 @@ import {
   fetchOllamaModels,
   fetchOpenRouterFreeModels,
 } from "./api";
+import { testEmbeddingConnection } from "./embeddings/factory";
+import {
+  DEFAULT_EMBEDDING_SETTINGS,
+  EMBEDDING_PROVIDER_PROFILES,
+} from "./embeddings/types";
+import type {
+  EmbeddingProviderId,
+  EmbeddingSettings,
+} from "./embeddings/types";
 
 export type InsertionType =
   | "end"
@@ -45,6 +54,8 @@ export interface AIHubSettings {
     maxConcurrent: number;
     delayMs: number;
   };
+  // ── Семантические функции ─────────────────────────────────────────
+  semantic: EmbeddingSettings;
 }
 
 export const DEFAULT_SETTINGS: AIHubSettings = {
@@ -68,12 +79,20 @@ export const DEFAULT_SETTINGS: AIHubSettings = {
     maxConcurrent: 3,
     delayMs: 1000,
   },
+  semantic: { ...DEFAULT_EMBEDDING_SETTINGS },
 };
 
 // ─────────────────────────────────────────────────────────────────────
 export class AIHubSettingTab extends PluginSettingTab {
   plugin: AIHubPlugin;
   private dynamicSection: HTMLElement | null = null;
+  private embeddingTestInFlight = false;
+  private embeddingTestButton: HTMLButtonElement | null = null;
+  private embeddingTestStatus: HTMLElement | null = null;
+  private embeddingTestSnapshot: {
+    provider: string;
+    model: string;
+  } | null = null;
 
   constructor(app: App, plugin: AIHubPlugin) {
     super(app, plugin);
@@ -92,6 +111,18 @@ export class AIHubSettingTab extends PluginSettingTab {
     const iconWrap = wrapper.createSpan({ cls: "ai-hub-section-icon" });
     setIcon(iconWrap, icon);
     wrapper.createDiv({ text, cls: "ai-hub-section-label" });
+  }
+
+  private setEmbeddingTestStatus(text: string, color: string) {
+    if (!this.embeddingTestStatus?.isConnected) return;
+    this.embeddingTestStatus.setCssProps({ "--ai-status-color": color });
+    this.embeddingTestStatus.setText(text);
+  }
+
+  private setEmbeddingTestButtonBusy(busy: boolean) {
+    if (!this.embeddingTestButton?.isConnected) return;
+    if (busy) this.embeddingTestButton.setAttribute("disabled", "true");
+    else this.embeddingTestButton.removeAttribute("disabled");
   }
 
   // ── Главный render ───────────────────────────────────────────────────
@@ -118,6 +149,12 @@ export class AIHubSettingTab extends PluginSettingTab {
     // ── Динамическая секция (поля для выбранного провайдера) ───────────
     this.dynamicSection = containerEl.createDiv();
     this.renderDynamicSection(save);
+
+    containerEl.createEl("hr", { cls: "ai-hub-settings-separator" });
+
+    // ── Секция: embeddings ───────────────────────────────────────────
+    this.addHeading(tr("Embeddings"), "binary");
+    this.renderEmbeddingsSection(save);
 
     containerEl.createEl("hr", { cls: "ai-hub-settings-separator" });
 
@@ -529,6 +566,220 @@ export class AIHubSettingTab extends PluginSettingTab {
         testStatus.setText("✗ " + (e instanceof Error ? e.message : String(e)));
       }
       testBtn.removeAttribute("disabled");
+      })();
+    });
+  }
+
+  // ── Независимый embedding-провайдер ─────────────────────────────────
+  private renderEmbeddingsSection(save: () => Promise<void>) {
+    const semantic = this.plugin.settings.semantic;
+
+    this.addIcon(
+      new Setting(this.containerEl)
+        .setName(tr("Включить semantic-функции"))
+        .setDesc(
+          tr("Подготавливает отдельный embedding-провайдер для будущего семантического индекса."),
+        )
+        .addToggle((toggle) =>
+          toggle.setValue(semantic.enabled).onChange(async (value) => {
+            semantic.enabled = value;
+            await save();
+          }),
+        ),
+      "power",
+    );
+
+    this.addIcon(
+      new Setting(this.containerEl)
+        .setName(tr("Embedding-провайдер"))
+        .setDesc(tr("Работает независимо от языковой модели выше."))
+        .addDropdown((dropdown) => {
+          (Object.keys(EMBEDDING_PROVIDER_PROFILES) as EmbeddingProviderId[])
+            .forEach((id) => {
+              const profile = EMBEDDING_PROVIDER_PROFILES[id];
+              dropdown.addOption(id, profile.label);
+            });
+          dropdown
+            .setValue(semantic.embeddingProvider)
+            .onChange(async (value) => {
+              const provider = value as EmbeddingProviderId;
+              const profile = EMBEDDING_PROVIDER_PROFILES[provider];
+              semantic.embeddingProvider = provider;
+              semantic.embeddingBaseUrl = profile.defaultBaseUrl;
+              semantic.embeddingModel = profile.defaultModel;
+              await save();
+              this.display();
+            });
+        }),
+      "waypoints",
+    );
+
+    this.addIcon(
+      new Setting(this.containerEl)
+        .setName(tr("Модель embeddings"))
+        .setDesc(
+          semantic.embeddingProvider === "ollama"
+            ? tr("Имя embedding-модели как в Ollama.")
+            : tr("ID embedding-модели провайдера."),
+        )
+        .addText((text) =>
+          text
+            .setPlaceholder(
+              EMBEDDING_PROVIDER_PROFILES[semantic.embeddingProvider]
+                .defaultModel,
+            )
+            .setValue(semantic.embeddingModel)
+            .onChange(async (value) => {
+              semantic.embeddingModel = value.trim();
+              await save();
+            }),
+        ),
+      "scan-search",
+    );
+
+    this.addIcon(
+      new Setting(this.containerEl)
+        .setName(tr("Base URL embeddings"))
+        .setDesc(
+          tr("Базовый HTTP(S) URL без query и fragment. Endpoint будет добавлен автоматически."),
+        )
+        .addText((text) =>
+          text
+            .setPlaceholder(
+              EMBEDDING_PROVIDER_PROFILES[semantic.embeddingProvider]
+                .defaultBaseUrl,
+            )
+            .setValue(semantic.embeddingBaseUrl)
+            .onChange(async (value) => {
+              semantic.embeddingBaseUrl = value.trim();
+              await save();
+            }),
+        ),
+      "link",
+    );
+
+    if (semantic.embeddingProvider !== "ollama") {
+      let apiInput: HTMLInputElement | null = null;
+      let visible = false;
+      const apiKey =
+        semantic.embeddingProvider === "openrouter"
+          ? semantic.openRouterApiKey
+          : semantic.openAICompatibleApiKey;
+      const apiKeySetting = new Setting(this.containerEl)
+        .setName(tr("API-ключ embeddings"))
+        .setDesc(
+          semantic.embeddingProvider === "openrouter"
+            ? tr("Обязателен для OpenRouter. Хранится локально.")
+            : tr("Обязателен для OpenAI; у custom API может не требоваться."),
+        )
+        .addText((text) => {
+          apiInput = text.inputEl;
+          text.inputEl.type = "password";
+          text.inputEl.setAttribute("autocomplete", "off");
+          return text
+            .setPlaceholder("sk-...")
+            .setValue(apiKey)
+            .onChange(async (value) => {
+              if (semantic.embeddingProvider === "openrouter") {
+                semantic.openRouterApiKey = value.trim();
+              } else {
+                semantic.openAICompatibleApiKey = value.trim();
+              }
+              await save();
+            });
+        })
+        .addButton((button) =>
+          button
+            .setIcon("eye")
+            .setTooltip(tr("Показать/скрыть"))
+            .onClick(() => {
+              if (!apiInput) return;
+              visible = !visible;
+              apiInput.type = visible ? "text" : "password";
+              button.setIcon(visible ? "eye-off" : "eye");
+            }),
+        );
+      this.addIcon(apiKeySetting, "key");
+    }
+
+    const testRow = this.containerEl.createDiv({ cls: "ai-hub-test-row" });
+    const testButton = testRow.createEl("button", {
+      cls: "ai-hub-test-btn",
+    });
+    setIcon(testButton.createSpan(), "plug-zap");
+    testButton.createSpan({ text: tr("Проверить embeddings") });
+    const testStatus = testRow.createDiv({
+      cls: "ai-hub-conn-status ai-hub-embedding-status",
+    });
+    this.embeddingTestButton = testButton;
+    this.embeddingTestStatus = testStatus;
+
+    if (this.embeddingTestInFlight) {
+      this.setEmbeddingTestButtonBusy(true);
+      const snapshot = this.embeddingTestSnapshot;
+      this.setEmbeddingTestStatus(
+        snapshot
+          ? [
+              tr("Проверяю embeddings..."),
+              tr("Провайдер: {p}", { p: snapshot.provider }),
+              tr("Модель: {m}", { m: snapshot.model }),
+            ].join("\n")
+          : tr("Проверяю embeddings..."),
+        "var(--text-muted)",
+      );
+    }
+
+    testButton.addEventListener("click", () => {
+      if (this.embeddingTestInFlight) return;
+      void (async () => {
+        const requestSettings: EmbeddingSettings = { ...semantic };
+        const requestSnapshot = {
+          provider:
+            EMBEDDING_PROVIDER_PROFILES[requestSettings.embeddingProvider]
+              .label,
+          model: requestSettings.embeddingModel.trim(),
+        };
+        this.embeddingTestInFlight = true;
+        this.embeddingTestSnapshot = requestSnapshot;
+        this.setEmbeddingTestButtonBusy(true);
+        this.setEmbeddingTestStatus(
+          [
+            tr("Проверяю embeddings..."),
+            tr("Провайдер: {p}", { p: requestSnapshot.provider }),
+            tr("Модель: {m}", { m: requestSnapshot.model }),
+          ].join("\n"),
+          "var(--text-muted)",
+        );
+        try {
+          const result = await testEmbeddingConnection(requestSettings);
+          this.setEmbeddingTestStatus(
+            [
+              tr("Подключение успешно"),
+              tr("Провайдер: {p}", { p: result.provider }),
+              tr("Модель: {m}", { m: result.model }),
+              tr("Размерность: {n}", { n: result.dimensions }),
+            ].join("\n"),
+            "var(--color-green,#4caf50)",
+          );
+        } catch (error) {
+          this.setEmbeddingTestStatus(
+            [
+              tr("Ошибка embeddings: {message}", {
+                message:
+                  error instanceof Error
+                    ? error.message
+                    : tr("Неизвестная ошибка"),
+              }),
+              tr("Провайдер: {p}", { p: requestSnapshot.provider }),
+              tr("Модель: {m}", { m: requestSnapshot.model }),
+            ].join("\n"),
+            "var(--color-red,#f44336)",
+          );
+        } finally {
+          this.embeddingTestInFlight = false;
+          this.embeddingTestSnapshot = null;
+          this.setEmbeddingTestButtonBusy(false);
+        }
       })();
     });
   }
