@@ -1,4 +1,5 @@
 import type {
+  VectorChunkMetadata,
   VectorSearchOptions,
   VectorSearchResult,
   VectorStore,
@@ -23,6 +24,10 @@ export class NullVectorStore implements VectorStore {
   }
 
   async applyChanges(_mutation: VectorStoreMutation): Promise<void> {}
+
+  listMetadata(): VectorChunkMetadata[] {
+    return [];
+  }
 
   async search(
     _query: Float32Array,
