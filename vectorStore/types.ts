@@ -44,6 +44,8 @@ export interface VectorStoreStats {
 export interface VectorStore {
   initialize(): Promise<void>;
 
+  listMetadata(): VectorChunkMetadata[];
+
   /**
    * Applies one durable mutation. An empty mutation is still a successful
    * snapshot commit and advances generation.

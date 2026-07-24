@@ -527,6 +527,11 @@ export class LocalVectorStore implements VectorStore {
     return operation;
   }
 
+  listMetadata(): VectorChunkMetadata[] {
+    this.requireInitialized();
+    return this.state.metadata.map(cloneMetadata);
+  }
+
   async search(
     query: Float32Array,
     options: VectorSearchOptions,

@@ -2311,6 +2311,76 @@ describe("manifest, binary format, persistence and clear", () => {
   });
 });
 
+describe("VectorStore listMetadata", () => {
+  it("requires LocalVectorStore initialization and lists an empty store", async () => {
+    const store = createStore();
+    expect(() => store.listMetadata()).toThrow(
+      VectorStoreNotInitializedError,
+    );
+    await store.initialize();
+    expect(store.listMetadata()).toEqual([]);
+  });
+
+  it("returns deterministic full metadata without vectors or mutable aliases", async () => {
+    const first = recoveryEntry("a", new Float32Array([1, 0, 0]));
+    const second = recoveryEntry("b", new Float32Array([0, 1, 0]));
+    const { store } = await savedStore(
+      new MemoryPersistence(),
+      [second, first],
+    );
+
+    const listed = store.listMetadata();
+    expect(listed.map((metadata) => metadata.id)).toEqual(["a", "b"]);
+    expect(listed).toEqual([metadataOf(first), metadataOf(second)]);
+    expect(listed[0]).not.toHaveProperty("vector");
+    listed.reverse();
+    listed[1].headingPath[0] = "mutated";
+    listed[1].source.startOffset = 999;
+    listed[1].preview = "mutated";
+
+    expect(store.listMetadata()).toEqual([
+      metadataOf(first),
+      metadataOf(second),
+    ]);
+  });
+
+  it("tracks deleteIds and deletePaths", async () => {
+    const a = recoveryEntry("a", new Float32Array([1, 0, 0]));
+    const b = recoveryEntry("b", new Float32Array([0, 1, 0]));
+    const c = recoveryEntry("c", new Float32Array([0, 0, 1]));
+    c.path = b.path;
+    const { store } = await savedStore(
+      new MemoryPersistence(),
+      [a, b, c],
+    );
+    await store.applyChanges({ deleteIds: [a.id] });
+    expect(store.listMetadata().map((metadata) => metadata.id)).toEqual([
+      "b",
+      "c",
+    ]);
+    await store.applyChanges({ deletePaths: [b.path] });
+    expect(store.listMetadata()).toEqual([]);
+  });
+
+  it("roundtrips metadata through reload and clears it", async () => {
+    const persistence = new MemoryPersistence();
+    const value = recoveryEntry("a", new Float32Array([1, 0, 0]));
+    await savedStore(persistence, [value]);
+    const reloaded = createStore(persistence);
+    await reloaded.initialize();
+    expect(reloaded.listMetadata()).toEqual([metadataOf(value)]);
+    await reloaded.clear();
+    expect(reloaded.listMetadata()).toEqual([]);
+  });
+
+  it("keeps NullVectorStore permissive and empty", async () => {
+    const store = new NullVectorStore();
+    expect(store.listMetadata()).toEqual([]);
+    await store.initialize();
+    expect(store.listMetadata()).toEqual([]);
+  });
+});
+
 describe("NullVectorStore", () => {
   it("initializes and reports stable empty stats", async () => {
     const store = new NullVectorStore();
