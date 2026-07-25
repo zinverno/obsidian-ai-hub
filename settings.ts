@@ -1,5 +1,12 @@
 import { t as tr, setLanguage, AIHubLang } from "./i18n";
-import { App, PluginSettingTab, Setting, setIcon } from "obsidian";
+import {
+  App,
+  ButtonComponent,
+  Notice,
+  PluginSettingTab,
+  Setting,
+  setIcon,
+} from "obsidian";
 import AIHubPlugin from "./main";
 import { LLMProvider, PROVIDER_PROFILES } from "./constants";
 import {
@@ -16,6 +23,10 @@ import type {
   EmbeddingProviderId,
   EmbeddingSettings,
 } from "./embeddings/types";
+import {
+  semanticControlDisabled,
+  SemanticSettingsActionRunner,
+} from "./semantic/semanticSettingsActionRunner";
 
 export type InsertionType =
   | "end"
@@ -93,6 +104,7 @@ export class AIHubSettingTab extends PluginSettingTab {
     provider: string;
     model: string;
   } | null = null;
+  private readonly semanticActionRunner = new SemanticSettingsActionRunner();
 
   constructor(app: App, plugin: AIHubPlugin) {
     super(app, plugin);
@@ -578,11 +590,12 @@ export class AIHubSettingTab extends PluginSettingTab {
       new Setting(this.containerEl)
         .setName(tr("Включить semantic-функции"))
         .setDesc(
-          tr("Подготавливает отдельный embedding-провайдер для будущего семантического индекса."),
+          tr("Включает ручную локальную индексацию Vault и смысловой поиск по заметкам."),
         )
         .addToggle((toggle) =>
           toggle.setValue(semantic.enabled).onChange(async (value) => {
             semantic.enabled = value;
+            this.plugin.getSemanticController().notifySettingsChanged();
             await save();
           }),
         ),
@@ -607,6 +620,7 @@ export class AIHubSettingTab extends PluginSettingTab {
               semantic.embeddingProvider = provider;
               semantic.embeddingBaseUrl = profile.defaultBaseUrl;
               semantic.embeddingModel = profile.defaultModel;
+              this.plugin.getSemanticController().notifySettingsChanged();
               await save();
               this.display();
             });
@@ -631,6 +645,7 @@ export class AIHubSettingTab extends PluginSettingTab {
             .setValue(semantic.embeddingModel)
             .onChange(async (value) => {
               semantic.embeddingModel = value.trim();
+              this.plugin.getSemanticController().notifySettingsChanged();
               await save();
             }),
         ),
@@ -652,6 +667,7 @@ export class AIHubSettingTab extends PluginSettingTab {
             .setValue(semantic.embeddingBaseUrl)
             .onChange(async (value) => {
               semantic.embeddingBaseUrl = value.trim();
+              this.plugin.getSemanticController().notifySettingsChanged();
               await save();
             }),
         ),
@@ -685,6 +701,7 @@ export class AIHubSettingTab extends PluginSettingTab {
               } else {
                 semantic.openAICompatibleApiKey = value.trim();
               }
+              this.plugin.getSemanticController().notifySettingsChanged();
               await save();
             });
         })
@@ -781,6 +798,129 @@ export class AIHubSettingTab extends PluginSettingTab {
           this.setEmbeddingTestButtonBusy(false);
         }
       })();
+    });
+
+    this.renderSemanticIndexControls();
+  }
+
+  private renderSemanticIndexControls(): void {
+    const controller = this.plugin.getSemanticController();
+    const status = controller.getSemanticStatus();
+    const statusLabels: Record<typeof status.kind, string> = {
+      disabled: tr("Выключен"),
+      "not-initialized": tr("Не инициализирован"),
+      initializing: tr("Инициализация..."),
+      ready: tr("Готов"),
+      indexing: tr("Индексация..."),
+      incompatible: tr("Несовместимый индекс"),
+      error: tr("Ошибка"),
+    };
+
+    const block = this.containerEl.createDiv({
+      cls: "ai-semantic-index-status",
+    });
+    block.createDiv({
+      cls: "ai-semantic-index-status-title",
+      text: tr("Семантический индекс"),
+    });
+    const details = [
+      tr("Статус: {status}", { status: statusLabels[status.kind] }),
+      tr("Провайдер: {p}", { p: status.providerLabel }),
+      tr("Модель: {m}", { m: status.model }),
+    ];
+    if (status.kind === "ready" || status.kind === "indexing") {
+      details.push(
+        tr("Chunks: {n}", { n: status.vectorCount }),
+        tr("Generation: {n}", { n: status.vectorGeneration }),
+        tr("Размерность: {n}", { n: status.dimensions }),
+      );
+    }
+    block.createDiv({
+      cls: "ai-semantic-index-status-details",
+      text: details.join("\n"),
+    });
+
+    const buttons: ButtonComponent[] = [];
+    const registerAction = (
+      button: ButtonComponent,
+      action: () => Promise<unknown>,
+      disabledWhenSemanticOff: boolean,
+    ): ButtonComponent => {
+      buttons.push(button);
+      button.setDisabled(
+        semanticControlDisabled({
+          runnerBusy: this.semanticActionRunner.busy,
+          statusKind: status.kind,
+          semanticEnabled: this.plugin.settings.semantic.enabled,
+          requiresEnabled: disabledWhenSemanticOff,
+        }),
+      );
+      button.onClick(() => {
+        void this.runSemanticControlAction(buttons, action);
+      });
+      return button;
+    };
+
+    const actions = new Setting(this.containerEl)
+      .setName(tr("Управление semantic index"))
+      .setDesc(tr("Операции запускаются только вручную."))
+      .addButton((button) =>
+        registerAction(
+          button
+            .setButtonText(tr("Обновить индекс Vault"))
+            .setIcon("refresh-cw"),
+          () => controller.indexVault(),
+          true,
+        ),
+      )
+      .addButton((button) =>
+        registerAction(
+          button
+            .setButtonText(tr("Очистить индекс"))
+            .setIcon("trash-2")
+            .setWarning(),
+          () => controller.clearIndex(),
+          true,
+        ),
+      )
+      .addButton((button) =>
+        registerAction(
+          button
+            .setButtonText(tr("Перестроить индекс"))
+            .setIcon("rotate-ccw")
+            .setWarning(),
+          () => controller.rebuildIndex(),
+          true,
+        ),
+      )
+      .addButton((button) =>
+        registerAction(
+          button
+            .setButtonText(tr("Обновить статус"))
+            .setIcon("database"),
+          () => controller.refreshSemanticStatus(),
+          false,
+        ),
+      );
+    this.addIcon(actions, "search");
+  }
+
+  private async runSemanticControlAction(
+    buttons: readonly ButtonComponent[],
+    action: () => Promise<unknown>,
+  ): Promise<void> {
+    await this.semanticActionRunner.run({
+      buttons,
+      action,
+      onError: () => {
+        new Notice(
+          tr(
+            "Не удалось выполнить semantic-операцию. Проверьте настройки и повторите.",
+          ),
+        );
+      },
+      isContainerConnected: () => this.containerEl.isConnected,
+      refresh: () => this.display(),
     });
   }
 

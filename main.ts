@@ -52,6 +52,7 @@ import {
 import { NoteIndexManager } from "./noteIndex";
 import { mergeEmbeddingSettings } from "./embeddings/types";
 import type { StoredEmbeddingSettings } from "./embeddings/types";
+import { ObsidianSemanticController } from "./semantic";
 
 type Mode = "simple" | "selection" | "vault";
 
@@ -67,6 +68,11 @@ export default class AIHubPlugin extends Plugin {
   settings: AIHubSettings;
   lastPrompt = "";
   private noteIndexPromise: Promise<NoteIndexManager> | null = null;
+  private semanticController!: ObsidianSemanticController;
+
+  getSemanticController(): ObsidianSemanticController {
+    return this.semanticController;
+  }
 
   /**
    * Единственный на плагин экземпляр индекса: загружается с диска один раз,
@@ -86,6 +92,8 @@ export default class AIHubPlugin extends Plugin {
     try {
       await this.loadSettings();
       setLanguage(this.settings.language ?? "auto");
+      this.semanticController = new ObsidianSemanticController(this);
+      this.semanticController.registerCommands();
 
       this.addRibbonIcon("sparkles", tr("AI Hub: Панель управления"), () => {
         new BatchProcessModal(this.app, this).open();
