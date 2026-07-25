@@ -18,6 +18,7 @@ import type {
   VectorStore,
   VectorStoreManifest,
   VectorStoreMutation,
+  VectorStorePersistence,
   VectorStoreStats,
 } from "./types";
 
@@ -106,6 +107,35 @@ interface SnapshotPairPaths {
   manifest: string;
   binary: string;
 }
+
+export interface LocalVectorStoreDescriptor {
+  dimensions: number;
+  embeddingSpaceId: string;
+  generation: number;
+  count: number;
+}
+
+export type LocalVectorStoreDescriptorProbeResult =
+  | { state: "absent" }
+  | {
+      state: "present";
+      source: "main" | "backup";
+      descriptor: LocalVectorStoreDescriptor;
+    }
+  | { state: "incomplete" }
+  | { state: "corrupt" };
+
+type DescriptorPairInspection =
+  | { kind: "absent" }
+  | { kind: "incomplete" }
+  | {
+      kind: "valid";
+      descriptor: LocalVectorStoreDescriptor;
+    }
+  | {
+      kind: "invalid";
+      compatibility: boolean;
+    };
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -436,6 +466,113 @@ function serializeManifest(
     records: metadata.map(cloneMetadata),
   };
   return `${JSON.stringify(manifest, null, 2)}\n`;
+}
+
+async function inspectDescriptorPair(
+  persistence: VectorStorePersistence,
+  paths: SnapshotPairPaths,
+  label: "main" | "backup",
+): Promise<DescriptorPairInspection> {
+  let manifestExists: boolean;
+  let binaryExists: boolean;
+  try {
+    [manifestExists, binaryExists] = await Promise.all([
+      persistence.exists(paths.manifest),
+      persistence.exists(paths.binary),
+    ]);
+  } catch (error) {
+    throw new VectorStorePersistenceError(
+      `Failed to inspect the ${label} vector-store descriptor.`,
+      error,
+    );
+  }
+
+  if (!manifestExists && !binaryExists) return { kind: "absent" };
+  if (manifestExists !== binaryExists) return { kind: "incomplete" };
+
+  let rawManifest: string;
+  try {
+    rawManifest = await persistence.readText(paths.manifest);
+  } catch (error) {
+    throw new VectorStorePersistenceError(
+      `Failed to read the ${label} vector-store descriptor.`,
+      error,
+    );
+  }
+
+  try {
+    const manifest = parseManifest(rawManifest);
+    return {
+      kind: "valid",
+      descriptor: {
+        dimensions: manifest.dimensions,
+        embeddingSpaceId: manifest.embeddingSpaceId,
+        generation: manifest.generation,
+        count: manifest.count,
+      },
+    };
+  } catch (error) {
+    if (
+      error instanceof VectorStoreCompatibilityError ||
+      error instanceof VectorStoreCorruptionError
+    ) {
+      return {
+        kind: "invalid",
+        compatibility: error instanceof VectorStoreCompatibilityError,
+      };
+    }
+    throw error;
+  }
+}
+
+/**
+ * Reads only strict main/backup manifest descriptors. Temp files are never
+ * authoritative. LocalVectorStore.initialize() remains responsible for binary
+ * validation, snapshot selection, and crash recovery.
+ */
+export async function probeLocalVectorStoreDescriptor(
+  persistence: VectorStorePersistence,
+  basePath: string,
+): Promise<LocalVectorStoreDescriptorProbeResult> {
+  const normalizedBasePath = normalizeVectorStoreBasePath(basePath);
+  const mainPaths = {
+    manifest: joinPath(normalizedBasePath, VECTOR_MANIFEST_FILE),
+    binary: joinPath(normalizedBasePath, VECTOR_BINARY_FILE),
+  };
+  const backupPaths = {
+    manifest: joinPath(normalizedBasePath, VECTOR_MANIFEST_BACKUP_FILE),
+    binary: joinPath(normalizedBasePath, VECTOR_BINARY_BACKUP_FILE),
+  };
+  const [main, backup] = await Promise.all([
+    inspectDescriptorPair(persistence, mainPaths, "main"),
+    inspectDescriptorPair(persistence, backupPaths, "backup"),
+  ]);
+
+  if (main.kind === "valid") {
+    return { state: "present", source: "main", descriptor: main.descriptor };
+  }
+
+  // A complete manifest from another schema/contract is authoritative and
+  // must not be hidden by an older backup.
+  if (main.kind === "invalid" && main.compatibility) {
+    return { state: "corrupt" };
+  }
+
+  if (backup.kind === "valid") {
+    return {
+      state: "present",
+      source: "backup",
+      descriptor: backup.descriptor,
+    };
+  }
+
+  if (main.kind === "absent" && backup.kind === "absent") {
+    return { state: "absent" };
+  }
+  if (main.kind === "invalid" || backup.kind === "invalid") {
+    return { state: "corrupt" };
+  }
+  return { state: "incomplete" };
 }
 
 function buffersEqual(left: ArrayBuffer, right: ArrayBuffer): boolean {

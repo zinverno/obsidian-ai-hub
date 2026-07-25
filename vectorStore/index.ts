@@ -18,6 +18,7 @@ export {
 export {
   LocalVectorStore,
   normalizeVectorStoreBasePath,
+  probeLocalVectorStoreDescriptor,
   VECTOR_BINARY_BACKUP_FILE,
   VECTOR_BINARY_FILE,
   VECTOR_BINARY_TEMP_FILE,
@@ -25,6 +26,10 @@ export {
   VECTOR_MANIFEST_FILE,
   VECTOR_MANIFEST_SCHEMA_VERSION,
   VECTOR_MANIFEST_TEMP_FILE,
+} from "./localVectorStore";
+export type {
+  LocalVectorStoreDescriptor,
+  LocalVectorStoreDescriptorProbeResult,
 } from "./localVectorStore";
 export { NullVectorStore } from "./nullVectorStore";
 export { ObsidianVectorStorePersistence } from "./obsidianPersistence";
