@@ -108,6 +108,10 @@ class RecordingVectorStore implements VectorStore {
     return this.delegate.listMetadata();
   }
 
+  readSnapshot() {
+    return this.delegate.readSnapshot();
+  }
+
   async applyChanges(mutation: VectorStoreMutation): Promise<void> {
     this.mutations.push({
       deletePaths: [...(mutation.deletePaths ?? [])],
@@ -495,6 +499,13 @@ describe("IndexingService initialization", () => {
         throw new VectorStoreCompatibilityError("old space");
       },
       listMetadata: () => [],
+      readSnapshot: () => ({
+        generation: 0,
+        dimensions: 3,
+        embeddingSpaceId: "old",
+        metadata: [],
+        vectors: new Float32Array(0),
+      }),
       applyChanges: async () => {},
       search: async () => [],
       clear: async () => {

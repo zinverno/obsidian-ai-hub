@@ -2381,11 +2381,66 @@ describe("VectorStore listMetadata", () => {
   });
 });
 
+describe("VectorStore readSnapshot", () => {
+  it("requires initialization and returns aligned defensive copies", async () => {
+    const store = createStore();
+    expect(() => store.readSnapshot()).toThrow(
+      VectorStoreNotInitializedError,
+    );
+    await store.initialize();
+    const first = recoveryEntry("a", new Float32Array([1, 0, 0]));
+    await store.applyChanges({ upserts: [first] });
+
+    const snapshot = store.readSnapshot();
+    expect(snapshot.generation).toBe(1);
+    expect(snapshot.dimensions).toBe(3);
+    expect(snapshot.metadata).toEqual([metadataOf(first)]);
+    expect(snapshot.vectors).toEqual(new Float32Array([1, 0, 0]));
+
+    snapshot.metadata[0].headingPath[0] = "mutated";
+    snapshot.metadata[0].source.startLine = 99;
+    snapshot.vectors[0] = 0;
+    expect(store.readSnapshot().metadata).toEqual([metadataOf(first)]);
+    expect(store.readSnapshot().vectors).toEqual(
+      new Float32Array([1, 0, 0]),
+    );
+  });
+
+  it("remains one committed generation after a later mutation", async () => {
+    const first = recoveryEntry("a", new Float32Array([1, 0, 0]));
+    const second = recoveryEntry("b", new Float32Array([0, 1, 0]));
+    const { store } = await savedStore(new MemoryPersistence(), [first]);
+    const before = store.readSnapshot();
+
+    await store.applyChanges({ upserts: [second] });
+
+    expect(before.generation).toBe(1);
+    expect(before.metadata.map((metadata) => metadata.id)).toEqual(["a"]);
+    expect(before.vectors).toEqual(new Float32Array([1, 0, 0]));
+    expect(store.readSnapshot().generation).toBe(2);
+    expect(store.readSnapshot().metadata.map((metadata) => metadata.id)).toEqual([
+      "a",
+      "b",
+    ]);
+  });
+});
+
 describe("NullVectorStore", () => {
   it("initializes and reports stable empty stats", async () => {
     const store = new NullVectorStore();
     await store.initialize();
     expect(store.getStats()).toEqual({ initialized: true, count: 0, dimensions: 0, embeddingSpaceId: "disabled", generation: 0, binaryBytes: 0 });
+  });
+
+  it("returns a stable empty discovery snapshot", () => {
+    const store = new NullVectorStore(3, "disabled-test");
+    expect(store.readSnapshot()).toEqual({
+      generation: 0,
+      dimensions: 3,
+      embeddingSpaceId: "disabled-test",
+      metadata: [],
+      vectors: new Float32Array(0),
+    });
   });
 
   it("implements no-op mutation, empty search and no-op clear", async () => {

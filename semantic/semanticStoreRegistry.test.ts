@@ -21,6 +21,15 @@ class FakeStore implements VectorStore {
   listMetadata(): VectorChunkMetadata[] {
     return [];
   }
+  readSnapshot() {
+    return {
+      generation: 0,
+      dimensions: 3,
+      embeddingSpaceId: "space-a",
+      metadata: [],
+      vectors: new Float32Array(0),
+    };
+  }
   async applyChanges(_mutation: VectorStoreMutation): Promise<void> {}
   async search(
     _query: Float32Array,

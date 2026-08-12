@@ -155,7 +155,16 @@ import {
   semanticBasename,
   semanticBreadcrumb,
 } from "./semanticSearchModal";
-import type { SemanticDocumentResult } from "./types";
+import {
+  SemanticDuplicatesModal,
+  SemanticSimilarNotesModal,
+} from "./semanticDiscoveryModal";
+import { SemanticSourceNotIndexedError } from "./errors";
+import type {
+  SemanticDocumentResult,
+  SemanticDocumentSimilarity,
+  SemanticDuplicatePair,
+} from "./types";
 
 function flush(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
@@ -360,6 +369,235 @@ describe("SemanticSearchModal helpers and behavior", () => {
   it("never assigns user strings through innerHTML", () => {
     const source = readFileSync(
       new URL("./semanticSearchModal.ts", import.meta.url),
+      "utf8",
+    );
+    expect(source).not.toContain("innerHTML");
+    expect(source).not.toContain("insertAdjacentHTML");
+  });
+});
+
+function discoveryMatch(path: string, line: number) {
+  return {
+    id: `${path}:0`,
+    path,
+    headingPath: [path.replace(/\.md$/u, ""), "Relevant"],
+    ordinal: 0,
+    preview: `safe preview for ${path}`,
+    source: {
+      startOffset: 0,
+      endOffset: 20,
+      startLine: line,
+      endLine: line,
+    },
+    score: 0.97,
+  };
+}
+
+function discoveryHarness() {
+  const similar: SemanticDocumentSimilarity[] = [
+    {
+      path: "Folder/Near.md",
+      score: 0.975,
+      matches: [discoveryMatch("Folder/Near.md", 12)],
+    },
+  ];
+  const pairs: SemanticDuplicatePair[] = [
+    {
+      leftPath: "A.md",
+      rightPath: "Folder/B.md",
+      score: 0.981,
+      leftMatches: [discoveryMatch("A.md", 3)],
+      rightMatches: [discoveryMatch("Folder/B.md", 18)],
+    },
+  ];
+  const files = new Map(
+    ["Folder/Near.md", "A.md", "Folder/B.md"].map((path) => [
+      path,
+      Object.assign(Object.create(mocks.TFile.prototype), { path }),
+    ]),
+  );
+  const view = new mocks.MarkdownView();
+  const leaf = {
+    view,
+    openFile: vi.fn(async () => undefined),
+  };
+  const app = {
+    vault: {
+      getFileByPath: vi.fn((path: string) => files.get(path) ?? null),
+    },
+    workspace: { getLeaf: vi.fn(() => leaf) },
+  };
+  const delegate = {
+    findSimilarNotes: vi.fn(async () => similar),
+    findPotentialDuplicates: vi.fn(async () => pairs),
+    errorMessage: vi.fn((_error: unknown) => "safe discovery error"),
+  };
+  return { app, delegate, leaf, view };
+}
+
+describe("semantic discovery modals", () => {
+  it("loads Similar Notes automatically and renders text-only evidence", async () => {
+    const { app, delegate } = discoveryHarness();
+    const modal = new SemanticSimilarNotesModal(
+      app as never,
+      delegate,
+      "Source.md",
+    );
+    modal.open();
+    await flush();
+    const content = modal.contentEl as unknown as InstanceType<
+      typeof mocks.FakeElement
+    >;
+    expect(delegate.findSimilarNotes).toHaveBeenCalledWith("Source.md");
+    expect(content.findByClass("ai-semantic-result-title")[0].text).toBe(
+      "Near",
+    );
+    expect(content.findByClass("ai-semantic-result-preview")[0].text).toBe(
+      "safe preview for Folder/Near.md",
+    );
+    expect(content.findByClass("ai-semantic-result-score")[0].text).toBe(
+      "0.975",
+    );
+  });
+
+  it("opens the exact Similar Notes path at the best chunk line", async () => {
+    const { app, delegate, leaf, view } = discoveryHarness();
+    const modal = new SemanticSimilarNotesModal(
+      app as never,
+      delegate,
+      "Source.md",
+    );
+    modal.open();
+    await flush();
+    const content = modal.contentEl as unknown as InstanceType<
+      typeof mocks.FakeElement
+    >;
+    content.findByClass("ai-semantic-result-card")[0].trigger("click");
+    await flush();
+    expect(app.vault.getFileByPath).toHaveBeenCalledWith("Folder/Near.md");
+    expect(leaf.openFile).toHaveBeenCalledWith(
+      expect.objectContaining({ path: "Folder/Near.md" }),
+    );
+    expect(view.editor.setCursor).toHaveBeenCalledWith({ line: 12, ch: 0 });
+    expect((modal as unknown as { closed: boolean }).closed).toBe(true);
+  });
+
+  it("renders one canonical potential-duplicate pair with two open targets", async () => {
+    const { app, delegate, leaf, view } = discoveryHarness();
+    const modal = new SemanticDuplicatesModal(app as never, delegate);
+    modal.open();
+    await flush();
+    const content = modal.contentEl as unknown as InstanceType<
+      typeof mocks.FakeElement
+    >;
+    expect(delegate.findPotentialDuplicates).toHaveBeenCalledOnce();
+    expect(content.findByClass("ai-semantic-duplicate-card")).toHaveLength(1);
+    expect(content.findByClass("ai-semantic-duplicate-note")).toHaveLength(2);
+    expect(content.findByClass("ai-semantic-duplicate-label")[0].text).toBe(
+      "Потенциально похожая пара",
+    );
+    content.findByClass("ai-semantic-duplicate-note")[1].trigger("keydown", {
+      key: "Enter",
+    });
+    await flush();
+    expect(leaf.openFile).toHaveBeenCalledWith(
+      expect.objectContaining({ path: "Folder/B.md" }),
+    );
+    expect(view.editor.setCursor).toHaveBeenCalledWith({ line: 18, ch: 0 });
+  });
+
+  it("shows controlled empty and error states", async () => {
+    const empty = discoveryHarness();
+    empty.delegate.findSimilarNotes.mockResolvedValue([]);
+    const similarModal = new SemanticSimilarNotesModal(
+      empty.app as never,
+      empty.delegate,
+      "Source.md",
+    );
+    similarModal.open();
+    await flush();
+    const similarContent = similarModal.contentEl as unknown as InstanceType<
+      typeof mocks.FakeElement
+    >;
+    expect(
+      similarContent.findByClass("ai-semantic-search-status")[0].text,
+    ).toBe("Похожие заметки не найдены.");
+
+    const failed = discoveryHarness();
+    failed.delegate.findPotentialDuplicates.mockRejectedValue(
+      new Error("private details"),
+    );
+    const duplicateModal = new SemanticDuplicatesModal(
+      failed.app as never,
+      failed.delegate,
+    );
+    duplicateModal.open();
+    await flush();
+    const duplicateContent =
+      duplicateModal.contentEl as unknown as InstanceType<
+        typeof mocks.FakeElement
+      >;
+    expect(
+      duplicateContent.findByClass("ai-semantic-search-status")[0].text,
+    ).toBe("safe discovery error");
+    expect(duplicateContent.text).not.toContain("private details");
+  });
+
+  it("renders a source-not-indexed rejection as a controlled localized state", async () => {
+    const { app, delegate } = discoveryHarness();
+    const notIndexed = new SemanticSourceNotIndexedError();
+    delegate.findSimilarNotes.mockRejectedValue(notIndexed);
+    delegate.errorMessage.mockImplementation((error: unknown) =>
+      error instanceof SemanticSourceNotIndexedError
+        ? "Текущая заметка отсутствует в семантическом индексе."
+        : "unexpected error",
+    );
+    const modal = new SemanticSimilarNotesModal(
+      app as never,
+      delegate,
+      "Source.md",
+    );
+    modal.open();
+    await flush();
+    const content = modal.contentEl as unknown as InstanceType<
+      typeof mocks.FakeElement
+    >;
+    const status = content.findByClass("ai-semantic-search-status")[0];
+    expect(delegate.errorMessage).toHaveBeenCalledWith(notIndexed);
+    expect(status.text).toBe(
+      "Текущая заметка отсутствует в семантическом индексе.",
+    );
+    expect(status.attributes.get("data-state")).toBe("error");
+    expect(status.text).not.toContain(notIndexed.message);
+  });
+
+  it("ignores stale discovery results after close", async () => {
+    let release: () => void = () => {};
+    const { app, delegate } = discoveryHarness();
+    delegate.findSimilarNotes.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          release = () => resolve([]);
+        }),
+    );
+    const modal = new SemanticSimilarNotesModal(
+      app as never,
+      delegate,
+      "Source.md",
+    );
+    modal.open();
+    const content = modal.contentEl as unknown as InstanceType<
+      typeof mocks.FakeElement
+    >;
+    modal.close();
+    release();
+    await flush();
+    expect(content.children).toEqual([]);
+  });
+
+  it("never assigns note content through HTML APIs", () => {
+    const source = readFileSync(
+      new URL("./semanticDiscoveryModal.ts", import.meta.url),
       "utf8",
     );
     expect(source).not.toContain("innerHTML");

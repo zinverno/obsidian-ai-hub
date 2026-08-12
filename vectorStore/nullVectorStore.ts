@@ -4,6 +4,7 @@ import type {
   VectorSearchResult,
   VectorStore,
   VectorStoreMutation,
+  VectorStoreSnapshot,
   VectorStoreStats,
 } from "./types";
 
@@ -27,6 +28,16 @@ export class NullVectorStore implements VectorStore {
 
   listMetadata(): VectorChunkMetadata[] {
     return [];
+  }
+
+  readSnapshot(): VectorStoreSnapshot {
+    return {
+      generation: 0,
+      dimensions: this.dimensions,
+      embeddingSpaceId: this.embeddingSpaceId,
+      metadata: [],
+      vectors: new Float32Array(0),
+    };
   }
 
   async search(

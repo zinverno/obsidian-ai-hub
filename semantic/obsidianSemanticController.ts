@@ -21,6 +21,7 @@ import {
   SemanticCompatibilityError,
   SemanticNotReadyError,
   SemanticProviderError,
+  SemanticSourceNotIndexedError,
   SemanticStorageError,
   SemanticValidationError,
 } from "./errors";
@@ -39,12 +40,18 @@ import type {
 } from "./semanticIndexProbe";
 import { SemanticSearchModal } from "./semanticSearchModal";
 import {
+  SemanticDuplicatesModal,
+  SemanticSimilarNotesModal,
+} from "./semanticDiscoveryModal";
+import {
   resetSemanticStorage,
   semanticIndexBasePath,
 } from "./semanticStorageMaintenance";
 import { SemanticStoreRegistry } from "./semanticStoreRegistry";
 import type {
   SemanticDocumentResult,
+  SemanticDocumentSimilarity,
+  SemanticDuplicatePair,
   SemanticRuntime,
   SemanticRuntimeStats,
   SemanticStatus,
@@ -77,6 +84,15 @@ export interface SemanticControllerDependencies {
   ) => Promise<boolean>;
   notice?: (message: string, duration?: number) => { hide(): void };
   openSearchModal?: (
+    app: App,
+    controller: ObsidianSemanticController,
+  ) => void;
+  openSimilarNotesModal?: (
+    app: App,
+    controller: ObsidianSemanticController,
+    sourcePath: string,
+  ) => void;
+  openDuplicatesModal?: (
     app: App,
     controller: ObsidianSemanticController,
   ) => void;
@@ -194,6 +210,12 @@ export class ObsidianSemanticController {
   private readonly openSearchModal: NonNullable<
     SemanticControllerDependencies["openSearchModal"]
   >;
+  private readonly openSimilarNotesModal: NonNullable<
+    SemanticControllerDependencies["openSimilarNotesModal"]
+  >;
+  private readonly openDuplicatesModal: NonNullable<
+    SemanticControllerDependencies["openDuplicatesModal"]
+  >;
   private readonly resetStorage: NonNullable<
     SemanticControllerDependencies["resetStorage"]
   >;
@@ -231,6 +253,16 @@ export class ObsidianSemanticController {
       ((app, controller) => {
         new SemanticSearchModal(app, controller).open();
       });
+    this.openSimilarNotesModal =
+      dependencies.openSimilarNotesModal ??
+      ((app, controller, sourcePath) => {
+        new SemanticSimilarNotesModal(app, controller, sourcePath).open();
+      });
+    this.openDuplicatesModal =
+      dependencies.openDuplicatesModal ??
+      ((app, controller) => {
+        new SemanticDuplicatesModal(app, controller).open();
+      });
     this.resetStorage = dependencies.resetStorage ?? resetSemanticStorage;
     this.probeIndex = dependencies.probeIndex ?? probeSemanticIndex;
     const automaticSyncSuspended =
@@ -261,6 +293,16 @@ export class ObsidianSemanticController {
       id: "ai-semantic-search",
       name: tr("Семантический поиск"),
       callback: () => this.openSearch(),
+    });
+    this.plugin.addCommand({
+      id: "ai-semantic-find-similar-notes",
+      name: tr("Найти похожие заметки"),
+      callback: () => this.openSimilarNotes(),
+    });
+    this.plugin.addCommand({
+      id: "ai-semantic-find-potential-duplicates",
+      name: tr("Найти потенциальные semantic-дубликаты"),
+      callback: () => this.openPotentialDuplicates(),
     });
     this.plugin.addCommand({
       id: "ai-semantic-index-vault",
@@ -419,6 +461,21 @@ export class ObsidianSemanticController {
     this.openSearchModal(this.plugin.app, this);
   }
 
+  openSimilarNotes(): void {
+    if (!this.ensureEnabled()) return;
+    const file = this.plugin.app.workspace.getActiveFile();
+    if (!(file instanceof TFile) || file.extension.toLowerCase() !== "md") {
+      this.notice(tr("Откройте Markdown-заметку для поиска похожих заметок."));
+      return;
+    }
+    this.openSimilarNotesModal(this.plugin.app, this, file.path);
+  }
+
+  openPotentialDuplicates(): void {
+    if (!this.ensureEnabled()) return;
+    this.openDuplicatesModal(this.plugin.app, this);
+  }
+
   async prepareSearch(): Promise<SemanticRuntimeStats> {
     return this.barrier.withShared(async () => {
       if (!this.plugin.settings.semantic.enabled) {
@@ -473,6 +530,28 @@ export class ObsidianSemanticController {
         );
       }
       return runtime.search(query, { limit: 10, matchesPerDocument: 3 });
+    });
+  }
+
+  async findSimilarNotes(
+    sourcePath: string,
+  ): Promise<SemanticDocumentSimilarity[]> {
+    return this.barrier.withShared(async () => {
+      const runtime = await this.runtimeForDiscovery();
+      return runtime.findSimilarNotes(sourcePath, {
+        limit: 10,
+        matchesPerDocument: 3,
+      });
+    });
+  }
+
+  async findPotentialDuplicates(): Promise<SemanticDuplicatePair[]> {
+    return this.barrier.withShared(async () => {
+      const runtime = await this.runtimeForDiscovery();
+      return runtime.findPotentialDuplicates({
+        limit: 100,
+        matchesPerDocument: 3,
+      });
     });
   }
 
@@ -731,6 +810,9 @@ export class ObsidianSemanticController {
         "Семантический индекс создан другой embedding-моделью. Верните прежние настройки или перестройте индекс.",
       );
     }
+    if (error instanceof SemanticSourceNotIndexedError) {
+      return tr("Текущая заметка отсутствует в семантическом индексе.");
+    }
     if (error instanceof SemanticNotReadyError) return error.message;
     if (error instanceof SemanticValidationError) {
       return tr("Проверьте параметры семантического поиска.");
@@ -767,6 +849,32 @@ export class ObsidianSemanticController {
     } else if (newIsMarkdown) {
       this.autoSync.upsert(file.path);
     }
+  }
+
+  private async runtimeForDiscovery(): Promise<SemanticRuntime> {
+    if (!this.plugin.settings.semantic.enabled) {
+      throw new SemanticNotReadyError(
+        tr("Включите semantic-функции в настройках"),
+      );
+    }
+    const runtime = await this.runtimeForSnapshot(
+      safeSettingsSnapshot(this.plugin.settings.semantic),
+      this.settingsEpoch,
+      "search",
+    );
+    if (!runtime) {
+      throw new SemanticNotReadyError(
+        tr("Семантический индекс пуст. Сначала обновите индекс Vault."),
+      );
+    }
+    if (!runtime.getStats().initialized) await runtime.initialize();
+    if (runtime.getStats().vectorCount <= 0) {
+      throw new SemanticNotReadyError(
+        tr("Семантический индекс пуст. Сначала обновите индекс Vault."),
+      );
+    }
+    this.updateReadyStatus(runtime);
+    return runtime;
   }
 
   private async flushAutomaticSync(

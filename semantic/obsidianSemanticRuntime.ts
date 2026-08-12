@@ -24,6 +24,7 @@ import {
 } from "./errors";
 import { LazySemanticRuntime } from "./semanticRuntime";
 import { SemanticSearchService } from "./semanticSearchService";
+import { SemanticDiscoveryService } from "./semanticDiscoveryService";
 import type { SemanticStoreRegistry } from "./semanticStoreRegistry";
 import type { SemanticIndexDescriptor } from "./semanticIndexProbe";
 import type { SemanticRuntime } from "./types";
@@ -133,6 +134,7 @@ export function createObsidianSemanticRuntime(
     return {
       indexingService,
       searchService,
+      discoveryService: new SemanticDiscoveryService(store, stats.dimensions),
       vectorStore: store,
       source: new ObsidianMarkdownDocumentSource(options.app),
     };

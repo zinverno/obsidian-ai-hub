@@ -43,5 +43,6 @@ export type {
   VectorStoreManifest,
   VectorStoreMutation,
   VectorStorePersistence,
+  VectorStoreSnapshot,
   VectorStoreStats,
 } from "./types";

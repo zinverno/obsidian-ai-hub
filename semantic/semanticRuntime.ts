@@ -12,17 +12,23 @@ import {
   SemanticNotReadyError,
 } from "./errors";
 import type { SemanticSearchService } from "./semanticSearchService";
+import { SemanticDiscoveryService } from "./semanticDiscoveryService";
 import type {
   SemanticDocumentResult,
+  SemanticDocumentSimilarity,
+  SemanticDuplicateOptions,
+  SemanticDuplicatePair,
   SemanticRuntime,
   SemanticRuntimeStats,
   SemanticPathChanges,
   SemanticSearchOptions,
+  SemanticSimilarNotesOptions,
 } from "./types";
 
 export interface SemanticRuntimeComponents {
   indexingService: IndexingService;
   searchService: SemanticSearchService;
+  discoveryService?: SemanticDiscoveryService;
   vectorStore: VectorStore;
   source: MarkdownDocumentSource;
 }
@@ -35,6 +41,7 @@ export class LazySemanticRuntime implements SemanticRuntime {
   private components: SemanticRuntimeComponents | null = null;
   private initializePromise: Promise<void> | null = null;
   private indexing = false;
+  private discoveryService: SemanticDiscoveryService | null = null;
 
   constructor(initializer: SemanticRuntimeInitializer) {
     if (typeof initializer !== "function") {
@@ -120,6 +127,21 @@ export class LazySemanticRuntime implements SemanticRuntime {
     return this.requireComponents().searchService.search(query, options);
   }
 
+  async findSimilarNotes(
+    sourcePath: string,
+    options?: SemanticSimilarNotesOptions,
+  ): Promise<SemanticDocumentSimilarity[]> {
+    await this.initialize();
+    return this.requireDiscoveryService().findSimilarNotes(sourcePath, options);
+  }
+
+  async findPotentialDuplicates(
+    options?: SemanticDuplicateOptions,
+  ): Promise<SemanticDuplicatePair[]> {
+    await this.initialize();
+    return this.requireDiscoveryService().findPotentialDuplicates(options);
+  }
+
   async clear(): Promise<void> {
     await this.initialize();
     await this.requireComponents().vectorStore.clear();
@@ -161,9 +183,17 @@ export class LazySemanticRuntime implements SemanticRuntime {
           "Semantic runtime initializer returned invalid components.",
         );
       }
+      const stats = components.vectorStore.getStats();
+      this.discoveryService =
+        components.discoveryService ??
+        new SemanticDiscoveryService(
+          components.vectorStore,
+          stats.dimensions,
+        );
       this.components = components;
     } catch (error) {
       this.components = null;
+      this.discoveryService = null;
       if (error instanceof IndexingCompatibilityError) {
         throw new SemanticCompatibilityError(error);
       }
@@ -174,5 +204,10 @@ export class LazySemanticRuntime implements SemanticRuntime {
   private requireComponents(): SemanticRuntimeComponents {
     if (!this.components) throw new SemanticNotReadyError();
     return this.components;
+  }
+
+  private requireDiscoveryService(): SemanticDiscoveryService {
+    if (!this.discoveryService) throw new SemanticNotReadyError();
+    return this.discoveryService;
   }
 }
