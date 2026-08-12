@@ -67,6 +67,8 @@ export interface AIHubSettings {
   };
   // ── Семантические функции ─────────────────────────────────────────
   semantic: EmbeddingSettings;
+  /** Clear keeps automatic sync suspended until a later explicit index run. */
+  semanticAutoSyncSuspended: boolean;
 }
 
 export const DEFAULT_SETTINGS: AIHubSettings = {
@@ -91,6 +93,7 @@ export const DEFAULT_SETTINGS: AIHubSettings = {
     delayMs: 1000,
   },
   semantic: { ...DEFAULT_EMBEDDING_SETTINGS },
+  semanticAutoSyncSuspended: false,
 };
 
 // ─────────────────────────────────────────────────────────────────────
@@ -590,7 +593,7 @@ export class AIHubSettingTab extends PluginSettingTab {
       new Setting(this.containerEl)
         .setName(tr("Включить semantic-функции"))
         .setDesc(
-          tr("Включает ручную локальную индексацию Vault и смысловой поиск по заметкам."),
+          tr("Semantic-функции работают только после включения. Первый индекс Vault запускается вручную."),
         )
         .addToggle((toggle) =>
           toggle.setValue(semantic.enabled).onChange(async (value) => {
@@ -601,6 +604,12 @@ export class AIHubSettingTab extends PluginSettingTab {
         ),
       "power",
     );
+
+    new Setting(this.containerEl)
+      .setName(tr("Автоматическая синхронизация semantic index"))
+      .setDesc(
+        tr("После создания первого индекса изменения Markdown-заметок синхронизируются автоматически. Изменённые chunks могут отправляться выбранному remote embedding-провайдеру; Ollama может генерировать embeddings локально. Vector index остаётся локальным, а Markdown-файлы не изменяются. Несовместимое embedding space требует явного rebuild."),
+      );
 
     this.addIcon(
       new Setting(this.containerEl)
@@ -863,7 +872,9 @@ export class AIHubSettingTab extends PluginSettingTab {
 
     const actions = new Setting(this.containerEl)
       .setName(tr("Управление semantic index"))
-      .setDesc(tr("Операции запускаются только вручную."))
+      .setDesc(
+        tr("Первое обновление, Clear и Rebuild запускаются вручную; обычные изменения Markdown затем синхронизируются автоматически."),
+      )
       .addButton((button) =>
         registerAction(
           button

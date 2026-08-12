@@ -50,6 +50,17 @@ const RESULT = {
   generationAfter: 1,
 };
 
+function deferred<T>(): {
+  promise: Promise<T>;
+  resolve(value: T): void;
+} {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
 function semantic(
   overrides: Partial<EmbeddingSettings> = {},
 ): EmbeddingSettings {
@@ -85,6 +96,16 @@ function fakeRuntime(overrides: Partial<SemanticRuntime> = {}): SemanticRuntime 
       return {
         ...RESULT,
         mode: "partial" as const,
+        generationAfter: generation,
+      };
+    }),
+    syncPaths: vi.fn(async () => {
+      initialized = true;
+      count = 1;
+      generation++;
+      return {
+        ...RESULT,
+        mode: "sync" as const,
         generationAfter: generation,
       };
     }),
@@ -141,11 +162,15 @@ function createHarness(
   const plugin = {
     app,
     manifest: { id: "ai-knowledge-hub" },
-    settings: { semantic: settings },
+    settings: {
+      semantic: settings,
+      semanticAutoSyncSuspended: false,
+    },
     addCommand: vi.fn((command) => {
       commands.push(command);
       return command;
     }),
+    saveSettings: vi.fn(async () => undefined),
   };
   const runtimes: SemanticRuntime[] = [];
   const runtimeFactory = vi.fn((_input: any) => {
@@ -327,6 +352,91 @@ describe("ObsidianSemanticController commands and lazy behavior", () => {
         (call) => call[0].settings.embeddingModel,
       ),
     ).toEqual(["model-a", "model-b"]);
+  });
+
+  it("does not reactivate a delayed runtime from an old settings epoch", async () => {
+    const oldProbe = deferred<{
+      state: "present";
+      source: "main";
+      descriptor: {
+        dimensions: number;
+        embeddingSpaceId: string;
+        generation: number;
+        count: number;
+      };
+    }>();
+    const probeIndex = vi
+      .fn()
+      .mockImplementationOnce(() => oldProbe.promise)
+      .mockImplementation(async () => ({
+        state: "present" as const,
+        source: "main" as const,
+        descriptor: {
+          dimensions: 3,
+          embeddingSpaceId: buildEmbeddingSpaceId({
+            providerId: "openai-compatible",
+            model: "model-b",
+            baseUrl: "https://example.test/v1",
+            dimensions: 3,
+          }),
+          generation: 1,
+          count: 1,
+        },
+      }));
+    const created: Array<{
+      model: string;
+      runtime: SemanticRuntime;
+    }> = [];
+    const runtimeFactory = vi.fn((input: { settings: EmbeddingSettings }) => {
+      const runtime = fakeRuntime();
+      created.push({ model: input.settings.embeddingModel, runtime });
+      return runtime;
+    });
+    const harness = createHarness(semantic(), {
+      probeIndex,
+      runtimeFactory: runtimeFactory as never,
+    });
+
+    const staleRefresh = harness.controller.refreshSemanticStatus();
+    await vi.waitFor(() => expect(probeIndex).toHaveBeenCalledOnce());
+    harness.plugin.settings.semantic.embeddingModel = "model-b";
+    harness.controller.notifySettingsChanged();
+    oldProbe.resolve({
+      state: "present",
+      source: "main",
+      descriptor: {
+        dimensions: 3,
+        embeddingSpaceId: buildEmbeddingSpaceId({
+          providerId: "openai-compatible",
+          model: "model-a",
+          baseUrl: "https://example.test/v1",
+          dimensions: 3,
+        }),
+        generation: 1,
+        count: 1,
+      },
+    });
+    await staleRefresh;
+
+    const afterStale = (
+      harness.controller as unknown as {
+        runtimeSlot: { runtime: SemanticRuntime } | null;
+      }
+    ).runtimeSlot;
+    expect(afterStale).toBeNull();
+
+    await harness.controller.refreshSemanticStatus();
+    const current = (
+      harness.controller as unknown as {
+        runtimeSlot: { runtime: SemanticRuntime } | null;
+      }
+    ).runtimeSlot;
+    expect(created.map((entry) => entry.model)).toEqual([
+      "model-a",
+      "model-b",
+    ]);
+    expect(current?.runtime).toBe(created[1].runtime);
+    expect(current?.runtime).not.toBe(created[0].runtime);
   });
 
   it("uses the selected key in the in-memory runtime signature", async () => {

@@ -1,6 +1,6 @@
 import { App, Notice, Plugin, TFile } from "obsidian";
+import type { TAbstractFile } from "obsidian";
 import { t as tr } from "../i18n";
-import { MarkdownChunker } from "../chunking";
 import {
   EMBEDDING_PROVIDER_PROFILES,
 } from "../embeddings/types";
@@ -10,6 +10,8 @@ import {
   IndexingCompatibilityError,
   IndexingProviderError,
   IndexingSourceError,
+  isMarkdownPath,
+  isMarkdownTFile,
 } from "../indexing";
 import type {
   IndexDocumentInput,
@@ -23,6 +25,10 @@ import {
   SemanticValidationError,
 } from "./errors";
 import { AsyncReadWriteBarrier } from "./asyncReadWriteBarrier";
+import {
+  SemanticAutoSync,
+} from "./semanticAutoSync";
+import type { SemanticAutoSyncBatch } from "./semanticAutoSync";
 import { createObsidianSemanticRuntime } from "./obsidianSemanticRuntime";
 import { confirmSemanticOperation } from "./semanticConfirmModal";
 import type { SemanticConfirmation } from "./semanticConfirmModal";
@@ -43,12 +49,18 @@ import type {
   SemanticRuntimeStats,
   SemanticStatus,
 } from "./types";
+import { normalizeVectorStoreBasePath } from "../vectorStore";
 
 interface SemanticPluginHost {
   app: App;
   manifest: { id: string };
-  settings: { semantic: EmbeddingSettings };
+  settings: {
+    semantic: EmbeddingSettings;
+    semanticAutoSyncSuspended?: boolean;
+  };
   addCommand(command: Parameters<Plugin["addCommand"]>[0]): unknown;
+  registerEvent(eventRef: Parameters<Plugin["registerEvent"]>[0]): void;
+  saveSettings(): Promise<void>;
 }
 
 export interface SemanticControllerDependencies {
@@ -72,6 +84,7 @@ export interface SemanticControllerDependencies {
   probeIndex?: typeof probeSemanticIndex;
   barrier?: AsyncReadWriteBarrier;
   storeRegistry?: SemanticStoreRegistry;
+  autoSyncDebounceMs?: number;
 }
 
 interface RuntimeSlot {
@@ -85,8 +98,17 @@ type SemanticRuntimeIntent =
   | "inspect"
   | "search"
   | "index"
+  | "auto"
   | "clear"
   | "rebuild";
+
+type AutomaticSyncPolicy =
+  | "active"
+  | "disabled"
+  | "cleared"
+  | "cleared-disabled"
+  | "clearing"
+  | "disposed";
 
 function safeSettingsSnapshot(settings: EmbeddingSettings): EmbeddingSettings {
   return {
@@ -119,6 +141,46 @@ function settingsSignature(settings: EmbeddingSettings): string {
   ]);
 }
 
+interface SharedSemanticMutationState {
+  queues: Map<string, Promise<void>>;
+}
+
+const SHARED_SEMANTIC_MUTATION_STATE: unique symbol = Symbol.for(
+  "vault-audit-ai.semantic-mutation-state.v1",
+) as never;
+
+type GlobalWithSemanticMutationState = typeof globalThis & {
+  [SHARED_SEMANTIC_MUTATION_STATE]?: SharedSemanticMutationState;
+};
+
+function sharedSemanticMutationState(): SharedSemanticMutationState {
+  const root = globalThis as GlobalWithSemanticMutationState;
+  const existing = root[SHARED_SEMANTIC_MUTATION_STATE];
+  if (existing) return existing;
+  const created: SharedSemanticMutationState = { queues: new Map() };
+  root[SHARED_SEMANTIC_MUTATION_STATE] = created;
+  return created;
+}
+
+function enqueueSharedSemanticMutation<T>(
+  basePath: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const state = sharedSemanticMutationState();
+  const key = normalizeVectorStoreBasePath(basePath);
+  const previous = state.queues.get(key);
+  const pending = previous ? previous.then(operation) : operation();
+  const tail = pending.then(
+    () => undefined,
+    () => undefined,
+  );
+  state.queues.set(key, tail);
+  void tail.then(() => {
+    if (state.queues.get(key) === tail) state.queues.delete(key);
+  });
+  return pending;
+}
+
 export class ObsidianSemanticController {
   private readonly runtimeFactory: NonNullable<
     SemanticControllerDependencies["runtimeFactory"]
@@ -140,9 +202,15 @@ export class ObsidianSemanticController {
   >;
   private readonly barrier: AsyncReadWriteBarrier;
   private readonly storeRegistry: SemanticStoreRegistry;
+  private readonly autoSync: SemanticAutoSync;
   private runtimeSlot: RuntimeSlot | null = null;
   private operationBusy = false;
   private settingsEpoch = 0;
+  private indexingQueue: Promise<void> = Promise.resolve();
+  private autoSyncRegistered = false;
+  private autoSyncFailureNoticed = false;
+  private autoSyncPolicy: AutomaticSyncPolicy;
+  private disposePromise: Promise<void> | null = null;
   private status: SemanticStatus;
 
   constructor(
@@ -165,6 +233,22 @@ export class ObsidianSemanticController {
       });
     this.resetStorage = dependencies.resetStorage ?? resetSemanticStorage;
     this.probeIndex = dependencies.probeIndex ?? probeSemanticIndex;
+    const automaticSyncSuspended =
+      this.plugin.settings.semanticAutoSyncSuspended === true;
+    this.autoSyncPolicy = this.plugin.settings.semantic.enabled
+      ? automaticSyncSuspended
+        ? "cleared"
+        : "active"
+      : automaticSyncSuspended
+        ? "cleared-disabled"
+        : "disabled";
+    this.autoSync = new SemanticAutoSync({
+      debounceMs: dependencies.autoSyncDebounceMs,
+      flush: (batch) => this.flushAutomaticSync(batch),
+      onError: (error) => this.handleAutomaticSyncError(error),
+    });
+    // The state machine remains dormant until Vault listeners are registered.
+    this.autoSync.reconfigure({ paused: true, preservePending: false });
     this.status = this.defaultStatus(
       this.plugin.settings.semantic.enabled
         ? "not-initialized"
@@ -200,6 +284,57 @@ export class ObsidianSemanticController {
     });
   }
 
+  registerAutomaticSync(): void {
+    if (this.autoSyncRegistered || this.autoSyncPolicy === "disposed") return;
+    this.autoSyncRegistered = true;
+    this.plugin.registerEvent(
+      this.plugin.app.vault.on("create", (file) => {
+        if (isMarkdownTFile(file)) this.autoSync.upsert(file.path);
+      }),
+    );
+    this.plugin.registerEvent(
+      this.plugin.app.vault.on("modify", (file) => {
+        if (isMarkdownTFile(file)) this.autoSync.upsert(file.path);
+      }),
+    );
+    this.plugin.registerEvent(
+      this.plugin.app.vault.on("delete", (file) => {
+        if (isMarkdownTFile(file)) this.autoSync.delete(file.path);
+      }),
+    );
+    this.plugin.registerEvent(
+      this.plugin.app.vault.on("rename", (file, oldPath) => {
+        this.handleAutomaticRename(file, oldPath);
+      }),
+    );
+    this.autoSync.reconfigure({
+      paused: this.autoSyncPolicy !== "active",
+      preservePending: true,
+    });
+    this.plugin.app.workspace.onLayoutReady(() => {
+      if (
+        this.autoSyncPolicy === "active" &&
+        this.plugin.settings.semantic.enabled
+      ) {
+        this.autoSync.reconcile();
+      }
+    });
+  }
+
+  dispose(): Promise<void> {
+    if (this.disposePromise) return this.disposePromise;
+    if (this.autoSyncPolicy !== "disposed") {
+      this.autoSyncPolicy = "disposed";
+      this.autoSync.dispose();
+      this.runtimeSlot = null;
+    }
+    this.disposePromise = this.indexingQueue.then(
+      () => undefined,
+      () => undefined,
+    );
+    return this.disposePromise;
+  }
+
   getSemanticStatus(): SemanticStatus {
     this.reconcileCachedStatus();
     return { ...this.status };
@@ -208,6 +343,27 @@ export class ObsidianSemanticController {
   notifySettingsChanged(): void {
     this.settingsEpoch++;
     this.runtimeSlot = null;
+    if (this.autoSyncPolicy !== "disposed") {
+      const suppressedByClear =
+        this.autoSyncPolicy === "cleared" ||
+        this.autoSyncPolicy === "cleared-disabled";
+      if (!this.plugin.settings.semantic.enabled) {
+        this.autoSyncPolicy = suppressedByClear
+          ? "cleared-disabled"
+          : "disabled";
+        this.autoSync.reconfigure({ paused: true, preservePending: true });
+      } else if (suppressedByClear) {
+        this.autoSyncPolicy = "cleared";
+        this.autoSync.reconfigure({ paused: true, preservePending: true });
+      } else {
+        this.autoSyncPolicy = "active";
+        this.autoSync.reconfigure({
+          paused: !this.autoSyncRegistered,
+          preservePending: true,
+          reconcile: this.autoSyncRegistered,
+        });
+      }
+    }
     this.status = this.defaultStatus(
       this.plugin.settings.semantic.enabled
         ? "not-initialized"
@@ -344,25 +500,29 @@ export class ObsidianSemanticController {
       });
       if (!confirmed) return;
 
-      await this.barrier.withShared(async () => {
-        const runtime = await this.runtimeForSnapshot(
-          snapshot,
-          epoch,
-          "index",
-        );
-        if (!runtime) throw new SemanticNotReadyError();
-        const progress = this.notice(
-          tr("Обновляю семантический индекс..."),
-          0,
-        );
-        try {
-          const result = await runtime.indexVault();
-          this.updateReadyStatus(runtime);
-          this.notice(this.formatVaultResult(result), 10000);
-        } finally {
-          progress.hide();
-        }
-      });
+      await this.enqueueIndexMutation(() =>
+        this.barrier.withShared(async () => {
+          const runtime = await this.runtimeForSnapshot(
+            snapshot,
+            epoch,
+            "index",
+          );
+          if (!runtime) throw new SemanticNotReadyError();
+          const progress = this.notice(
+            tr("Обновляю семантический индекс..."),
+            0,
+          );
+          try {
+            const result = await runtime.indexVault();
+            this.updateReadyStatus(runtime);
+            await this.activateAutomaticSync();
+            this.autoSyncFailureNoticed = false;
+            this.notice(this.formatVaultResult(result), 10000);
+          } finally {
+            progress.hide();
+          }
+        }),
+      );
     } catch (error) {
       this.captureErrorStatus(error);
       this.showError(error);
@@ -381,60 +541,61 @@ export class ObsidianSemanticController {
         this.notice(tr("Откройте Markdown-заметку для индексации."));
         return;
       }
-      await this.barrier.withShared(async () => {
-        let document: IndexDocumentInput;
-        try {
-          document = {
-            path: file.path,
-            content: await this.plugin.app.vault.cachedRead(file),
-            cache: this.plugin.app.metadataCache.getFileCache(file),
-          };
-        } catch {
-          this.notice(tr("Не удалось прочитать текущую заметку."));
-          return;
-        }
-        const preflight = await this.probeRuntimeDescriptor(this.basePath());
-        if (
-          preflight.state === "absent" &&
-          new MarkdownChunker().chunk(document).length === 0
-        ) {
-          this.status = this.defaultStatus("not-initialized", snapshot);
-          this.notice(
-            tr("Заметка уже актуальна в семантическом индексе."),
+      await this.enqueueIndexMutation(() =>
+        this.barrier.withShared(async () => {
+          let document: IndexDocumentInput;
+          try {
+            document = {
+              path: file.path,
+              content: await this.plugin.app.vault.cachedRead(file),
+              cache: this.plugin.app.metadataCache.getFileCache(file),
+            };
+          } catch {
+            this.notice(tr("Не удалось прочитать текущую заметку."));
+            return;
+          }
+          const preflight = await this.probeRuntimeDescriptor(this.basePath());
+          if (preflight.state === "absent") {
+            this.status = this.defaultStatus("not-initialized", snapshot);
+            this.notice(
+              tr("Семантический индекс пуст. Сначала обновите индекс Vault."),
+            );
+            return;
+          }
+          const runtime = await this.runtimeForSnapshot(
+            snapshot,
+            epoch,
+            "index",
           );
-          return;
-        }
-        const runtime = await this.runtimeForSnapshot(
-          snapshot,
-          epoch,
-          "index",
-        );
-        if (!runtime) throw new SemanticNotReadyError();
-        const result = await runtime.indexDocument(document);
-        this.updateReadyStatus(runtime);
-        if (
-          result.documentsUnchanged === 1 &&
-          result.chunksEmbedded === 0 &&
-          result.chunksDeleted === 0
-        ) {
-          this.notice(
-            tr("Заметка уже актуальна в семантическом индексе."),
-          );
-        } else {
-          this.notice(
-            tr(
-              "Заметка обновлена: chunks {seen}, embedded {embedded}, deleted {deleted}, generation {generation}.",
-              {
-                seen: result.chunksSeen,
-                embedded: result.chunksEmbedded,
-                deleted: result.chunksDeleted,
-                generation: result.generationAfter,
-              },
-            ),
-            8000,
-          );
-        }
-      });
+          if (!runtime) throw new SemanticNotReadyError();
+          const result = await runtime.indexDocument(document);
+          this.updateReadyStatus(runtime);
+          await this.activateAutomaticSync();
+          this.autoSyncFailureNoticed = false;
+          if (
+            result.documentsUnchanged === 1 &&
+            result.chunksEmbedded === 0 &&
+            result.chunksDeleted === 0
+          ) {
+            this.notice(
+              tr("Заметка уже актуальна в семантическом индексе."),
+            );
+          } else {
+            this.notice(
+              tr(
+                "Заметка обновлена: chunks {seen}, embedded {embedded}, deleted {deleted}, generation {generation}.",
+                {
+                  seen: result.chunksSeen,
+                  embedded: result.chunksEmbedded,
+                  deleted: result.chunksDeleted,
+                  generation: result.generationAfter,
+                },
+              ),
+              8000,
+            );
+          }
+        }),
+      );
     } catch (error) {
       this.captureErrorStatus(error);
       this.showError(error);
@@ -459,22 +620,38 @@ export class ObsidianSemanticController {
         danger: true,
       });
       if (!confirmed) return;
-      await this.barrier.withExclusive(async () => {
-        const runtime = await this.runtimeForSnapshot(
-          snapshot,
-          epoch,
-          "clear",
-        );
-        if (!runtime) {
-          this.status = this.defaultStatus("not-initialized", snapshot);
-          this.notice(
-            tr("Семантический индекс пуст. Сначала обновите индекс Vault."),
-          );
-          return;
+
+      await this.enqueueIndexMutation(async () => {
+        await this.persistAutomaticSyncSuspended(true);
+        if (this.autoSyncPolicy === "disposed") return;
+
+        this.autoSyncPolicy = "clearing";
+        this.autoSync.clearAndPause();
+        try {
+          await this.barrier.withExclusive(async () => {
+            const runtime = await this.runtimeForSnapshot(
+              snapshot,
+              epoch,
+              "clear",
+            );
+            if (!runtime) {
+              this.status = this.defaultStatus("not-initialized", snapshot);
+              this.notice(
+                tr("Семантический индекс пуст. Сначала обновите индекс Vault."),
+              );
+              return;
+            }
+            await runtime.clear();
+            this.updateReadyStatus(runtime);
+            this.notice(tr("Семантический индекс очищен."));
+          });
+        } finally {
+          if (!this.isDisposed()) {
+            this.autoSyncPolicy = this.plugin.settings.semantic.enabled
+              ? "cleared"
+              : "cleared-disabled";
+          }
         }
-        await runtime.clear();
-        this.updateReadyStatus(runtime);
-        this.notice(tr("Семантический индекс очищен."));
       });
     } catch (error) {
       this.captureErrorStatus(error);
@@ -507,32 +684,36 @@ export class ObsidianSemanticController {
       });
       if (!confirmed) return;
 
-      await this.barrier.withExclusive(async () => {
-        const basePath = this.basePath();
-        this.runtimeSlot = null;
-        try {
-          await this.resetStorage(this.plugin.app.vault.adapter, basePath);
-        } finally {
-          this.storeRegistry.delete(basePath);
-        }
-        const runtime = await this.runtimeForSnapshot(
-          snapshot,
-          epoch,
-          "rebuild",
-        );
-        if (!runtime) throw new SemanticNotReadyError();
-        const progress = this.notice(
-          tr("Перестраиваю семантический индекс..."),
-          0,
-        );
-        try {
-          const result = await runtime.indexVault();
-          this.updateReadyStatus(runtime);
-          this.notice(this.formatVaultResult(result), 10000);
-        } finally {
-          progress.hide();
-        }
-      });
+      await this.enqueueIndexMutation(() =>
+        this.barrier.withExclusive(async () => {
+          const basePath = this.basePath();
+          this.runtimeSlot = null;
+          try {
+            await this.resetStorage(this.plugin.app.vault.adapter, basePath);
+          } finally {
+            this.storeRegistry.delete(basePath);
+          }
+          const runtime = await this.runtimeForSnapshot(
+            snapshot,
+            epoch,
+            "rebuild",
+          );
+          if (!runtime) throw new SemanticNotReadyError();
+          const progress = this.notice(
+            tr("Перестраиваю семантический индекс..."),
+            0,
+          );
+          try {
+            const result = await runtime.indexVault();
+            this.updateReadyStatus(runtime);
+            await this.activateAutomaticSync();
+            this.autoSyncFailureNoticed = false;
+            this.notice(this.formatVaultResult(result), 10000);
+          } finally {
+            progress.hide();
+          }
+        }),
+      );
     } catch (error) {
       this.captureErrorStatus(error);
       this.showError(error);
@@ -571,6 +752,139 @@ export class ObsidianSemanticController {
     return tr(
       "Не удалось выполнить semantic-операцию. Проверьте настройки и повторите.",
     );
+  }
+
+  private handleAutomaticRename(
+    file: TAbstractFile,
+    oldPath: string,
+  ): void {
+    const oldWasMarkdown = isMarkdownPath(oldPath);
+    const newIsMarkdown = isMarkdownTFile(file);
+    if (oldWasMarkdown && newIsMarkdown) {
+      this.autoSync.rename(oldPath, file.path);
+    } else if (oldWasMarkdown) {
+      this.autoSync.delete(oldPath);
+    } else if (newIsMarkdown) {
+      this.autoSync.upsert(file.path);
+    }
+  }
+
+  private async flushAutomaticSync(
+    batch: SemanticAutoSyncBatch,
+  ): Promise<void> {
+    await this.enqueueIndexMutation(() =>
+      this.barrier.withShared(async () => {
+        if (
+          this.autoSyncPolicy !== "active" ||
+          !this.plugin.settings.semantic.enabled ||
+          !this.autoSync.isCurrentEpoch(batch.epoch)
+        ) {
+          return;
+        }
+        const snapshot = safeSettingsSnapshot(this.plugin.settings.semantic);
+        const settingsEpoch = this.settingsEpoch;
+        const runtime = await this.runtimeForSnapshot(
+          snapshot,
+          settingsEpoch,
+          "auto",
+        );
+        if (!runtime) {
+          this.status = this.defaultStatus("not-initialized", snapshot);
+          return;
+        }
+        const shouldCommit = () =>
+          this.autoSyncPolicy === "active" &&
+          this.plugin.settings.semantic.enabled &&
+          this.autoSync.isCurrentEpoch(batch.epoch) &&
+          this.snapshotIsCurrent(snapshot, settingsEpoch);
+        this.status = this.defaultStatus("indexing", snapshot);
+        if (batch.reconcileAll) {
+          await runtime.indexVault({ shouldCommit });
+        } else {
+          await runtime.syncPaths(
+            {
+              upsertPaths: batch.upsertPaths,
+              deletePaths: batch.deletePaths,
+            },
+            { shouldCommit },
+          );
+        }
+        if (!shouldCommit()) return;
+        this.updateReadyStatus(runtime);
+        this.autoSyncFailureNoticed = false;
+      }),
+    );
+  }
+
+  private handleAutomaticSyncError(error: unknown): void {
+    if (
+      this.autoSyncPolicy !== "active" ||
+      !this.plugin.settings.semantic.enabled
+    ) {
+      return;
+    }
+    this.captureErrorStatus(error);
+    if (this.autoSyncFailureNoticed) return;
+    this.autoSyncFailureNoticed = true;
+    this.showError(error);
+  }
+
+  private async activateAutomaticSync(): Promise<void> {
+    if (
+      this.autoSyncPolicy === "disposed" ||
+      (this.autoSyncPolicy === "active" &&
+        this.plugin.settings.semanticAutoSyncSuspended !== true)
+    ) {
+      return;
+    }
+    await this.persistAutomaticSyncSuspended(false);
+    if (this.isDisposed()) return;
+    if (!this.plugin.settings.semantic.enabled) {
+      this.autoSyncPolicy = "disabled";
+      this.autoSync.reconfigure({ paused: true, preservePending: true });
+      return;
+    }
+    this.autoSyncPolicy = "active";
+    this.autoSync.reconfigure({
+      paused: !this.autoSyncRegistered,
+      preservePending: true,
+    });
+  }
+
+  private async persistAutomaticSyncSuspended(
+    suspended: boolean,
+  ): Promise<void> {
+    const previous =
+      this.plugin.settings.semanticAutoSyncSuspended === true;
+    if (previous === suspended) return;
+    this.plugin.settings.semanticAutoSyncSuspended = suspended;
+    try {
+      await this.plugin.saveSettings();
+    } catch {
+      this.plugin.settings.semanticAutoSyncSuspended = previous;
+      throw new SemanticStorageError(
+        "Semantic automatic-sync state could not be persisted safely.",
+      );
+    }
+  }
+
+  private enqueueIndexMutation(operation: () => Promise<void>): Promise<void> {
+    const pending = this.indexingQueue.then(() => {
+      if (this.isDisposed()) return;
+      return enqueueSharedSemanticMutation(this.basePath(), async () => {
+        if (this.isDisposed()) return;
+        await operation();
+      });
+    });
+    this.indexingQueue = pending.then(
+      () => undefined,
+      () => undefined,
+    );
+    return pending;
+  }
+
+  private isDisposed(): boolean {
+    return this.autoSyncPolicy === "disposed";
   }
 
   private ensureEnabled(): boolean {

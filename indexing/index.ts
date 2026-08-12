@@ -13,6 +13,8 @@ export {
 } from "./embeddingSpace";
 export { IndexingService } from "./indexingService";
 export {
+  isMarkdownPath,
+  isMarkdownTFile,
   ObsidianMarkdownDocumentSource,
 } from "./obsidianDocumentSource";
 export type { ObsidianMarkdownSourceApp } from "./obsidianDocumentSource";
@@ -24,6 +26,8 @@ export type {
   EmbeddingSpaceDescriptor,
   EmbeddingSpaceDescriptorInput,
   IndexDocumentInput,
+  IndexingDocumentChanges,
+  IndexingExecutionOptions,
   IndexingRunResult,
   IndexingServiceOptions,
   IndexingServiceStats,

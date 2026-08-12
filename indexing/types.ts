@@ -12,7 +12,7 @@ export interface IndexDocumentInput {
 }
 
 export interface IndexingRunResult {
-  mode: "partial" | "reconcile" | "delete";
+  mode: "partial" | "reconcile" | "delete" | "sync";
   documentsSeen: number;
   documentsChanged: number;
   documentsUnchanged: number;
@@ -22,6 +22,16 @@ export interface IndexingRunResult {
   chunksDeleted: number;
   generationBefore: number;
   generationAfter: number;
+}
+
+export interface IndexingDocumentChanges {
+  upsertDocuments: readonly IndexDocumentInput[];
+  deletePaths: readonly string[];
+}
+
+export interface IndexingExecutionOptions {
+  /** Checked after every required embedding has been validated, before commit. */
+  shouldCommit?: () => boolean;
 }
 
 export interface IndexingServiceStats {
@@ -59,4 +69,8 @@ export interface IndexingServiceOptions {
 
 export interface MarkdownDocumentSource {
   readAll(): Promise<IndexDocumentInput[]>;
+  readPaths(paths: readonly string[]): Promise<{
+    documents: IndexDocumentInput[];
+    missingPaths: string[];
+  }>;
 }

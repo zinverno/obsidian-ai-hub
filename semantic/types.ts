@@ -1,6 +1,7 @@
 import type { ChunkSourceRange } from "../chunking/types";
 import type {
   IndexDocumentInput,
+  IndexingExecutionOptions,
   IndexingRunResult,
 } from "../indexing/types";
 
@@ -36,10 +37,19 @@ export interface SemanticRuntimeStats {
   embeddingSpaceId: string;
 }
 
+export interface SemanticPathChanges {
+  upsertPaths: readonly string[];
+  deletePaths: readonly string[];
+}
+
 export interface SemanticRuntime {
   initialize(): Promise<void>;
-  indexVault(): Promise<IndexingRunResult>;
+  indexVault(options?: IndexingExecutionOptions): Promise<IndexingRunResult>;
   indexDocument(document: IndexDocumentInput): Promise<IndexingRunResult>;
+  syncPaths(
+    changes: SemanticPathChanges,
+    options?: IndexingExecutionOptions,
+  ): Promise<IndexingRunResult>;
   search(
     query: string,
     options?: SemanticSearchOptions,

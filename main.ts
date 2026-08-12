@@ -94,6 +94,8 @@ export default class AIHubPlugin extends Plugin {
       setLanguage(this.settings.language ?? "auto");
       this.semanticController = new ObsidianSemanticController(this);
       this.semanticController.registerCommands();
+      this.semanticController.registerAutomaticSync();
+      this.register(() => void this.semanticController.dispose());
 
       this.addRibbonIcon("sparkles", tr("AI Hub: Панель управления"), () => {
         new BatchProcessModal(this.app, this).open();

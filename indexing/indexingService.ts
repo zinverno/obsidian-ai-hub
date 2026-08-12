@@ -15,6 +15,8 @@ import {
 import { buildEmbeddingSpaceId } from "./embeddingSpace";
 import type {
   IndexDocumentInput,
+  IndexingDocumentChanges,
+  IndexingExecutionOptions,
   IndexingRunResult,
   IndexingServiceOptions,
   IndexingServiceStats,
@@ -291,10 +293,42 @@ export class IndexingService {
 
   reconcileAll(
     documents: readonly IndexDocumentInput[],
+    options: IndexingExecutionOptions = {},
   ): Promise<IndexingRunResult> {
     this.requireInitialized();
     const prepared = this.prepareDocuments(documents);
-    return this.enqueue(() => this.executeDocuments("reconcile", prepared));
+    return this.enqueue(() =>
+      this.executeDocuments("reconcile", prepared, [], options),
+    );
+  }
+
+  syncDocuments(
+    changes: IndexingDocumentChanges,
+    options: IndexingExecutionOptions = {},
+  ): Promise<IndexingRunResult> {
+    this.requireInitialized();
+    if (!isObject(changes)) {
+      throw new IndexingValidationError("Document changes are invalid.");
+    }
+    const prepared = this.prepareDocuments(changes.upsertDocuments);
+    if (!Array.isArray(changes.deletePaths)) {
+      throw new IndexingValidationError("Document paths must be an array.");
+    }
+    const deletePathSet = new Set<string>();
+    for (const path of [...changes.deletePaths]) {
+      deletePathSet.add(validatePath(path));
+    }
+    for (const document of prepared) {
+      if (deletePathSet.has(document.path)) {
+        throw new IndexingValidationError(
+          `Document path "${document.path}" cannot be upserted and deleted in one batch.`,
+        );
+      }
+    }
+    const deletePaths = [...deletePathSet].sort(compareStrings);
+    return this.enqueue(() =>
+      this.executeDocuments("sync", prepared, deletePaths, options),
+    );
   }
 
   deleteDocuments(paths: readonly string[]): Promise<IndexingRunResult> {
@@ -474,8 +508,10 @@ export class IndexingService {
   }
 
   private async executeDocuments(
-    mode: "partial" | "reconcile",
+    mode: "partial" | "reconcile" | "sync",
     documents: readonly PreparedDocument[],
+    explicitDeletePaths: readonly string[] = [],
+    options: IndexingExecutionOptions = {},
   ): Promise<IndexingRunResult> {
     const store = this.requireStore();
     const generationBefore = store.getStats().generation;
@@ -490,12 +526,15 @@ export class IndexingService {
     }
 
     const documentPaths = new Set(documents.map((document) => document.path));
-    const deletePaths =
+    const requestedDeletePaths =
       mode === "reconcile"
         ? [...existingByPath.keys()]
             .filter((path) => !documentPaths.has(path))
             .sort(compareStrings)
-        : [];
+        : explicitDeletePaths;
+    const deletePaths = requestedDeletePaths.filter((path) =>
+      existingByPath.has(path),
+    );
     const deleteIds: string[] = [];
     const changedChunks: PreparedChunk[] = [];
     const changedDocuments = new Set<string>();
@@ -539,11 +578,11 @@ export class IndexingService {
         0,
       );
     const mutation: VectorStoreMutation = { deletePaths, deleteIds, upserts };
-    if (
+    const hasMutation =
       mutation.deletePaths!.length > 0 ||
       mutation.deleteIds!.length > 0 ||
-      mutation.upserts!.length > 0
-    ) {
+      mutation.upserts!.length > 0;
+    if (hasMutation && (options.shouldCommit?.() ?? true)) {
       try {
         await store.applyChanges(mutation);
       } catch (error) {
@@ -559,9 +598,13 @@ export class IndexingService {
     const generationAfter = store.getStats().generation;
     return {
       mode,
-      documentsSeen: documents.length,
+      documentsSeen: documents.length + explicitDeletePaths.length,
       documentsChanged: changedDocuments.size,
-      documentsUnchanged: documents.length - changedDocuments.size,
+      documentsUnchanged:
+        documents.length - changedDocuments.size +
+        (mode === "sync"
+          ? explicitDeletePaths.length - deletePaths.length
+          : 0),
       documentsDeleted: deletePaths.length,
       chunksSeen,
       chunksEmbedded: changedChunks.length,
