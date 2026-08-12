@@ -258,6 +258,13 @@ async function flushMicrotasks(): Promise<void> {
   await Promise.resolve();
 }
 
+async function flushTask(): Promise<void> {
+  await new Promise<void>((resolve) => {
+    setTimeout(resolve, 0);
+  });
+  await flushMicrotasks();
+}
+
 function createHarness(
   initialSettings = semantic(),
   adapter = new MemoryDataAdapter(),
@@ -425,6 +432,94 @@ beforeEach(() => {
 });
 
 describe("semantic read/write barrier with real services and store", () => {
+  it("keeps duplicate discovery on one committed snapshot during indexing", async () => {
+    const harness = createHarness();
+    harness.setContent(
+      "# Alpha\n\nalpha old committed semantic content with enough detail",
+    );
+    harness.createFile(
+      "Near.md",
+      "# Near\n\nalpha old committed semantic content with enough detail",
+    );
+    await harness.controller.indexVault();
+    const store = harness.registry.peek(BASE_PATH)?.store as LocalVectorStore;
+    expect(await harness.controller.findPotentialDuplicates()).toHaveLength(1);
+
+    harness.modifyFile(
+      "Near.md",
+      "# Near\n\nbeta replacement semantic content with enough detail",
+    );
+    const pendingEmbedding = blockNext((call) =>
+      call.texts.some((text) => text.includes("beta replacement semantic")),
+    );
+    const pendingIndex = harness.controller.indexVault();
+    await pendingEmbedding.entered;
+
+    const during = await harness.controller.findPotentialDuplicates();
+    expect(during.map((pair) => [pair.leftPath, pair.rightPath])).toEqual([
+      ["Alpha.md", "Near.md"],
+    ]);
+    expect(store.getStats().generation).toBe(1);
+
+    pendingEmbedding.release();
+    await pendingIndex;
+    expect(await harness.controller.findPotentialDuplicates()).toEqual([]);
+    expect(store.getStats().generation).toBe(2);
+  });
+
+  it("makes Clear wait for an active duplicate read lease", async () => {
+    const harness = createHarness();
+    await harness.controller.indexVault();
+    const runtime = activeSlot(harness.controller).runtime;
+    const store = runtimeStore(runtime);
+    const clearSpy = vi.spyOn(store, "clear");
+    const gate = manualGate();
+    vi.spyOn(runtime, "findPotentialDuplicates").mockImplementationOnce(
+      async () => {
+        gate.markEntered();
+        await gate.wait;
+        return [];
+      },
+    );
+
+    const discovery = harness.controller.findPotentialDuplicates();
+    await gate.entered;
+    const clear = harness.controller.clearIndex();
+    await flushTask();
+    expect(clearSpy).not.toHaveBeenCalled();
+
+    gate.release();
+    await discovery;
+    await clear;
+    expect(clearSpy).toHaveBeenCalledOnce();
+  });
+
+  it("makes Rebuild wait for an active Similar Notes read lease", async () => {
+    const harness = createHarness();
+    await harness.controller.indexVault();
+    const runtime = activeSlot(harness.controller).runtime;
+    const gate = manualGate();
+    vi.spyOn(runtime, "findSimilarNotes").mockImplementationOnce(async () => {
+      gate.markEntered();
+      await gate.wait;
+      return [];
+    });
+
+    const discovery = harness.controller.findSimilarNotes("Alpha.md");
+    await gate.entered;
+    const rebuild = harness.controller.rebuildIndex();
+    await flushTask();
+    expect(harness.resetStorage).not.toHaveBeenCalled();
+
+    gate.release();
+    await discovery;
+    await rebuild;
+    expect(harness.resetStorage).toHaveBeenCalledOnce();
+    await expect(
+      harness.controller.findSimilarNotes("Alpha.md"),
+    ).resolves.toEqual([]);
+  });
+
   it("lets ordinary indexing overlap search while exposing only committed generations", async () => {
     const harness = createHarness();
     await harness.controller.indexVault();
@@ -931,6 +1026,11 @@ describe("provider-free cold open and metadata status", () => {
         first.adapter,
       );
       await restarted.controller.refreshSemanticStatus();
+      expect(dimensions).not.toHaveBeenCalled();
+      expect(embed).not.toHaveBeenCalled();
+
+      await restarted.controller.findSimilarNotes("Alpha.md");
+      await restarted.controller.findPotentialDuplicates();
       expect(dimensions).not.toHaveBeenCalled();
       expect(embed).not.toHaveBeenCalled();
 

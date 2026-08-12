@@ -28,6 +28,31 @@ export interface SemanticDocumentResult {
   matches: SemanticChunkMatch[];
 }
 
+export interface SemanticSimilarNotesOptions {
+  limit?: number;
+  matchesPerDocument?: number;
+}
+
+/** Document-centroid similarity with chunk-level evidence for navigation. */
+export interface SemanticDocumentSimilarity {
+  path: string;
+  score: number;
+  matches: SemanticChunkMatch[];
+}
+
+export interface SemanticDuplicateOptions {
+  limit?: number;
+  matchesPerDocument?: number;
+}
+
+export interface SemanticDuplicatePair {
+  leftPath: string;
+  rightPath: string;
+  score: number;
+  leftMatches: SemanticChunkMatch[];
+  rightMatches: SemanticChunkMatch[];
+}
+
 export interface SemanticRuntimeStats {
   initialized: boolean;
   indexing: boolean;
@@ -54,6 +79,18 @@ export interface SemanticRuntime {
     query: string,
     options?: SemanticSearchOptions,
   ): Promise<SemanticDocumentResult[]>;
+  /**
+   * Rejects with SemanticSourceNotIndexedError when a non-empty compatible
+   * index does not contain the requested source; UI boundaries render that
+   * typed domain rejection as a controlled localized state.
+   */
+  findSimilarNotes(
+    sourcePath: string,
+    options?: SemanticSimilarNotesOptions,
+  ): Promise<SemanticDocumentSimilarity[]>;
+  findPotentialDuplicates(
+    options?: SemanticDuplicateOptions,
+  ): Promise<SemanticDuplicatePair[]>;
   clear(): Promise<void>;
   getStats(): SemanticRuntimeStats;
 }

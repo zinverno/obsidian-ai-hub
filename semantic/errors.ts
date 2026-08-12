@@ -15,6 +15,13 @@ export class SemanticNotReadyError extends SemanticError {
   }
 }
 
+export class SemanticSourceNotIndexedError extends SemanticNotReadyError {
+  constructor() {
+    super("The source note is not present in the semantic index.");
+    this.name = "SemanticSourceNotIndexedError";
+  }
+}
+
 export class SemanticValidationError extends SemanticError {
   constructor(message: string) {
     super("SemanticValidationError", message);

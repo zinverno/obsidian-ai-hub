@@ -19,6 +19,7 @@ import type {
   VectorStoreManifest,
   VectorStoreMutation,
   VectorStorePersistence,
+  VectorStoreSnapshot,
   VectorStoreStats,
 } from "./types";
 
@@ -667,6 +668,18 @@ export class LocalVectorStore implements VectorStore {
   listMetadata(): VectorChunkMetadata[] {
     this.requireInitialized();
     return this.state.metadata.map(cloneMetadata);
+  }
+
+  readSnapshot(): VectorStoreSnapshot {
+    this.requireInitialized();
+    const snapshot = this.state;
+    return {
+      generation: snapshot.generation,
+      dimensions: this.dimensions,
+      embeddingSpaceId: this.embeddingSpaceId,
+      metadata: snapshot.metadata.map(cloneMetadata),
+      vectors: new Float32Array(snapshot.vectors),
+    };
   }
 
   async search(

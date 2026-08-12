@@ -41,10 +41,26 @@ export interface VectorStoreStats {
   binaryBytes: number;
 }
 
+/**
+ * Isolated, row-aligned view of one committed store generation.
+ *
+ * Implementations must return defensive copies: callers may retain or mutate
+ * this value without observing a later commit or changing store state.
+ */
+export interface VectorStoreSnapshot {
+  generation: number;
+  dimensions: number;
+  embeddingSpaceId: string;
+  metadata: VectorChunkMetadata[];
+  vectors: Float32Array;
+}
+
 export interface VectorStore {
   initialize(): Promise<void>;
 
   listMetadata(): VectorChunkMetadata[];
+
+  readSnapshot(): VectorStoreSnapshot;
 
   /**
    * Applies one durable mutation. An empty mutation is still a successful

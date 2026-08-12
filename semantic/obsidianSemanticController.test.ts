@@ -28,6 +28,7 @@ import type { EmbeddingSettings } from "../embeddings/types";
 import { buildEmbeddingSpaceId } from "../indexing";
 import { TFile } from "obsidian";
 import { SemanticCompatibilityError } from "./errors";
+import { SemanticSourceNotIndexedError } from "./errors";
 import { AsyncReadWriteBarrier } from "./asyncReadWriteBarrier";
 import {
   ObsidianSemanticController,
@@ -109,6 +110,8 @@ function fakeRuntime(overrides: Partial<SemanticRuntime> = {}): SemanticRuntime 
         generationAfter: generation,
       };
     }),
+    findSimilarNotes: vi.fn(async () => []),
+    findPotentialDuplicates: vi.fn(async () => []),
     search: vi.fn(async () => []),
     clear: vi.fn(async () => {
       initialized = true;
@@ -180,6 +183,8 @@ function createHarness(
   });
   const confirm = vi.fn(async () => true);
   const openSearchModal = vi.fn();
+  const openSimilarNotesModal = vi.fn();
+  const openDuplicatesModal = vi.fn();
   const resetStorage = vi.fn(async () => undefined);
   const probeIndex = vi.fn(async () => ({
     state: "present" as const,
@@ -200,6 +205,8 @@ function createHarness(
     runtimeFactory,
     confirm,
     openSearchModal,
+    openSimilarNotesModal,
+    openDuplicatesModal,
     resetStorage,
     probeIndex,
     notice: (message) => {
@@ -218,6 +225,8 @@ function createHarness(
     runtimeFactory,
     confirm,
     openSearchModal,
+    openSimilarNotesModal,
+    openDuplicatesModal,
     resetStorage,
     probeIndex,
   };
@@ -231,6 +240,8 @@ describe("ObsidianSemanticController commands and lazy behavior", () => {
     harness.controller.registerCommands();
     expect(harness.commands.map((command) => command.id)).toEqual([
       "ai-semantic-search",
+      "ai-semantic-find-similar-notes",
+      "ai-semantic-find-potential-duplicates",
       "ai-semantic-index-vault",
       "ai-semantic-index-current-note",
       "ai-semantic-clear-index",
@@ -247,6 +258,8 @@ describe("ObsidianSemanticController commands and lazy behavior", () => {
     for (const command of harness.commands) command.callback?.();
     expect(harness.runtimeFactory).not.toHaveBeenCalled();
     expect(harness.openSearchModal).not.toHaveBeenCalled();
+    expect(harness.openSimilarNotesModal).not.toHaveBeenCalled();
+    expect(harness.openDuplicatesModal).not.toHaveBeenCalled();
     expect(harness.app.vault.getMarkdownFiles).not.toHaveBeenCalled();
     expect(harness.notices).toContain(
       "Включите semantic-функции в настройках",
@@ -258,6 +271,71 @@ describe("ObsidianSemanticController commands and lazy behavior", () => {
     harness.controller.openSearch();
     expect(harness.openSearchModal).toHaveBeenCalledOnce();
     expect(harness.runtimeFactory).not.toHaveBeenCalled();
+  });
+
+  it("opens discovery UI lazily and snapshots the active Markdown path", () => {
+    const harness = createHarness();
+    harness.controller.openSimilarNotes();
+    harness.controller.openPotentialDuplicates();
+    expect(harness.openSimilarNotesModal).toHaveBeenCalledWith(
+      harness.app,
+      harness.controller,
+      "Alpha.md",
+    );
+    expect(harness.openDuplicatesModal).toHaveBeenCalledWith(
+      harness.app,
+      harness.controller,
+    );
+    expect(harness.runtimeFactory).not.toHaveBeenCalled();
+  });
+
+  it("requires an active Markdown file before opening Similar Notes", () => {
+    const harness = createHarness();
+    harness.app.workspace.getActiveFile.mockReturnValue(null as never);
+    harness.controller.openSimilarNotes();
+    expect(harness.openSimilarNotesModal).not.toHaveBeenCalled();
+    expect(harness.notices).toContain(
+      "Откройте Markdown-заметку для поиска похожих заметок.",
+    );
+  });
+
+  it("reports an indexed-source miss without exposing its path", () => {
+    const harness = createHarness();
+    const message = harness.controller.errorMessage(
+      new SemanticSourceNotIndexedError(),
+    );
+    expect(message).toBe(
+      "Текущая заметка отсутствует в семантическом индексе.",
+    );
+    expect(message).not.toContain("Alpha.md");
+  });
+
+  it("delegates discovery reads through one compatible runtime", async () => {
+    const runtime = fakeRuntime({
+      getStats: vi.fn(() => ({
+        initialized: true,
+        indexing: false,
+        vectorCount: 2,
+        vectorGeneration: 4,
+        dimensions: 3,
+        embeddingSpaceId: "space",
+      })),
+    });
+    const harness = createHarness(semantic(), {
+      runtimeFactory: vi.fn(() => runtime),
+    });
+
+    await harness.controller.findSimilarNotes("Alpha.md");
+    await harness.controller.findPotentialDuplicates();
+
+    expect(runtime.findSimilarNotes).toHaveBeenCalledWith("Alpha.md", {
+      limit: 10,
+      matchesPerDocument: 3,
+    });
+    expect(runtime.findPotentialDuplicates).toHaveBeenCalledWith({
+      limit: 100,
+      matchesPerDocument: 3,
+    });
   });
 
   it("does nothing when full-index confirmation is declined", async () => {

@@ -12,7 +12,8 @@ Vault Audit AI helps you:
 - improve or transform individual notes and selected text with AI;
 - run deep audits that identify clusters, orphan notes, and structural issues;
 - build a local semantic vector index from Markdown notes;
-- find related notes by meaning rather than exact keywords.
+- find related notes by meaning rather than exact keywords;
+- discover notes similar to the active note and review highly similar pairs.
 
 Semantic features are opt-in and disabled by default. The first semantic index is built only after an explicit user action; once it exists, ordinary Markdown changes are synchronized automatically.
 
@@ -32,6 +33,14 @@ Semantic features are opt-in and disabled by default. The first semantic index i
 - Best-effort navigation to the most relevant source section.
 - Explicit clear and rebuild operations with confirmation.
 - Compatibility detection when the embedding provider, model, endpoint, or vector dimensions change.
+
+### Semantic discovery
+
+- **Find similar notes** builds a document representation for the active indexed Markdown note and ranks other indexed notes by document-level cosine similarity.
+- **Find potential semantic duplicates** conservatively reports highly similar note pairs. A reported pair is a review candidate, not proof that the notes are identical or safe to merge.
+- Both commands reuse vectors already stored in the existing local semantic index. They do not embed the active note again and do not call the embedding provider while comparing notes.
+- Results include exact vault paths and the strongest matching indexed sections for navigation.
+- Empty and near-empty notes are excluded with a deterministic minimum-content rule to reduce false positives.
 
 ### AI writing tools
 
@@ -80,6 +89,7 @@ The default OpenRouter example is `openai/text-embedding-3-small`. Model availab
 - The semantic vector index is stored in `.obsidian/plugins/ai-knowledge-hub/semantic-index/` inside the vault configuration directory.
 - The plugin does not upload stored vectors or their index metadata.
 - When OpenRouter or another remote embedding API is selected, note chunks are sent to that endpoint during the initial index and later automatic synchronization of changed chunks; semantic search queries are also sent to it for embedding.
+- Similar Notes and potential duplicate detection operate only on vectors already present in the local index and make no embedding-provider request for comparison.
 - Ollama allows embedding generation to remain local when it is connected to a local Ollama instance.
 - Automatic semantic synchronization never edits Markdown files. It reads the latest Markdown content and changes only the local vector index.
 - Writing, batch, and audit operations send the content required for the requested action to the configured language-model provider.
@@ -113,6 +123,8 @@ Do not copy the source TypeScript files into the plugin directory.
 5. Run **Update the Vault semantic index** from the command palette.
 6. Open **Semantic search** from the command palette.
 
+After the active note is indexed, **Find similar notes** can compare it with the rest of the index. **Find potential semantic duplicates** scans the existing document representations without re-embedding the vault.
+
 Step 5 is intentionally explicit and is never started automatically. After it succeeds, normal Markdown edits are synchronized in the background without a Notice for each successful update.
 
 ## Semantic index behavior
@@ -135,6 +147,8 @@ Step 5 is intentionally explicit and is never started automatically. After it su
 | Command | Purpose |
 | --- | --- |
 | **Semantic search** | Search the local vector index and open a grouped note result. |
+| **Find similar notes** | Compare the active indexed Markdown note with other indexed notes using existing local vectors. |
+| **Find potential semantic duplicates** | Review conservative, highly similar note pairs; similarity is not proof of identity. |
 | **Update the Vault semantic index** | Reconcile all eligible Markdown notes with the persistent semantic index. |
 | **Update the current note in the semantic index** | Incrementally index the active Markdown note. |
 | **Clear the semantic index** | Replace the current compatible semantic index with an empty one. |
@@ -156,6 +170,10 @@ Step 5 is intentionally explicit and is never started automatically. After it su
 - Automatic synchronization covers Markdown notes only; attachments, Canvas files, images, and other file types are ignored.
 - The vector store does not use an ANN or HNSW index.
 - Similarity search performs a local linear scan and is intended for small and medium personal vaults.
+- Similar Notes represents a document as the normalized mean of its chunk vectors; broad or multi-topic notes may therefore receive less intuitive rankings.
+- Potential duplicate detection compares exact document-vector pairs in quadratic time and is intended for small and medium personal vaults. It does not run LLM verification and never merges, links, edits, or deletes notes.
+- Very short notes are excluded from document discovery to reduce high-similarity false positives.
+- Semantic similarity indicates related meaning or overlap, not factual equivalence or duplicate identity.
 - Search quality depends on the selected embedding model and the language and structure of the notes.
 - Remote embedding providers may impose request limits, data-retention policies, or costs.
 - Changing the embedding space requires an explicit index rebuild.
@@ -182,12 +200,12 @@ Embedding provider
     ↓
 Local persistent vector store
     ↓
-Semantic search
+Chunk search + document representations
     ↓
-Grouped note results
+Grouped search, Similar Notes, and potential duplicate pairs
 ```
 
-Stable chunk hashes drive incremental deltas so unchanged chunks are reused. A debounced event coordinator coalesces Markdown path changes, while startup reconciliation catches offline changes. Manual and automatic indexing share one mutation queue; rename batches reach the vector store as one durable mutation. The vector store uses guarded temporary-file replacement, backup-aware recovery, and one shared store per semantic index path in the plugin runtime. Clear and rebuild are explicit operations that do not modify source notes.
+Stable chunk hashes drive incremental deltas so unchanged chunks are reused. A debounced event coordinator coalesces Markdown path changes, while startup reconciliation catches offline changes. Manual and automatic indexing share one mutation queue; rename batches reach the vector store as one durable mutation. The vector store uses guarded temporary-file replacement, backup-aware recovery, and one shared store per semantic index path in the plugin runtime. Document discovery reads one defensive committed snapshot from that same store. Clear and rebuild are explicit operations that do not modify source notes.
 
 ## License
 

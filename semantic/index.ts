@@ -3,6 +3,7 @@ export {
   SemanticError,
   SemanticNotReadyError,
   SemanticProviderError,
+  SemanticSourceNotIndexedError,
   SemanticStorageError,
   SemanticValidationError,
 } from "./errors";
@@ -12,6 +13,14 @@ export type {
 } from "./obsidianSemanticRuntime";
 export { ObsidianSemanticController } from "./obsidianSemanticController";
 export type { SemanticControllerDependencies } from "./obsidianSemanticController";
+export {
+  SemanticDiscoveryService,
+  DEFAULT_DUPLICATE_THRESHOLD,
+  DEFAULT_DUPLICATE_PAIR_LIMIT,
+  DEFAULT_SIMILAR_NOTES_LIMIT,
+  MIN_DOCUMENT_COHERENCE,
+  MIN_DOCUMENT_MEANINGFUL_CHARACTERS,
+} from "./semanticDiscoveryService";
 export {
   SemanticConfirmModal,
   confirmSemanticOperation,
@@ -24,6 +33,12 @@ export {
   semanticBreadcrumb,
 } from "./semanticSearchModal";
 export type { SemanticSearchModalDelegate } from "./semanticSearchModal";
+export {
+  SemanticDuplicatesModal,
+  SemanticSimilarNotesModal,
+  openDiscoveryResult,
+} from "./semanticDiscoveryModal";
+export type { SemanticDiscoveryModalDelegate } from "./semanticDiscoveryModal";
 export { LazySemanticRuntime } from "./semanticRuntime";
 export type {
   SemanticRuntimeComponents,
@@ -62,11 +77,15 @@ export type {
 } from "./semanticIndexProbe";
 export type {
   SemanticChunkMatch,
+  SemanticDocumentSimilarity,
   SemanticDocumentResult,
+  SemanticDuplicateOptions,
+  SemanticDuplicatePair,
   SemanticPathChanges,
   SemanticRuntime,
   SemanticRuntimeStats,
   SemanticSearchOptions,
+  SemanticSimilarNotesOptions,
   SemanticStatus,
   SemanticStatusKind,
 } from "./types";

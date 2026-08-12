@@ -245,6 +245,31 @@ describe("LazySemanticRuntime", () => {
     ]);
   });
 
+  it("uses existing vectors for Similar Notes and duplicates without provider calls", async () => {
+    const harness = createIntegrationHarness();
+    const content = "alpha semantic content with enough meaningful characters";
+    await harness.runtime.indexDocument({
+      path: "Source.md",
+      content,
+    });
+    await harness.runtime.indexDocument({
+      path: "Near.md",
+      content: `${content} again`,
+    });
+    const providerCalls = harness.provider.embedCalls.length;
+    const generation = harness.runtime.getStats().vectorGeneration;
+
+    const similar = await harness.runtime.findSimilarNotes("Source.md");
+    const duplicates = await harness.runtime.findPotentialDuplicates();
+
+    expect(similar.map((result) => result.path)).toEqual(["Near.md"]);
+    expect(duplicates.map((pair) => [pair.leftPath, pair.rightPath])).toEqual([
+      ["Near.md", "Source.md"],
+    ]);
+    expect(harness.provider.embedCalls).toHaveLength(providerCalls);
+    expect(harness.runtime.getStats().vectorGeneration).toBe(generation);
+  });
+
   it("uses readAll plus reconcileAll for full indexing", async () => {
     const harness = createIntegrationHarness();
     const first = await harness.runtime.indexVault();
