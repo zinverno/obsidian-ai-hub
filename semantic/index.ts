@@ -38,6 +38,11 @@ export {
 } from "./semanticSearchService";
 export { AsyncReadWriteBarrier } from "./asyncReadWriteBarrier";
 export type { ReadWriteLease } from "./asyncReadWriteBarrier";
+export { SemanticAutoSync } from "./semanticAutoSync";
+export type {
+  SemanticAutoSyncBatch,
+  SemanticAutoSyncOptions,
+} from "./semanticAutoSync";
 export { SemanticStoreRegistry } from "./semanticStoreRegistry";
 export type {
   SemanticStoreLifecycle,
@@ -58,6 +63,7 @@ export type {
 export type {
   SemanticChunkMatch,
   SemanticDocumentResult,
+  SemanticPathChanges,
   SemanticRuntime,
   SemanticRuntimeStats,
   SemanticSearchOptions,

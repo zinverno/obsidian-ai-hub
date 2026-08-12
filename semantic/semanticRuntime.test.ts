@@ -135,6 +135,22 @@ class FakeSource implements MarkdownDocumentSource {
     this.calls++;
     return this.documents.map((document) => ({ ...document }));
   }
+
+  async readPaths(paths: readonly string[]): Promise<{
+    documents: IndexDocumentInput[];
+    missingPaths: string[];
+  }> {
+    this.calls++;
+    const requested = new Set(paths);
+    const documents = this.documents
+      .filter((document) => requested.has(document.path))
+      .map((document) => ({ ...document }));
+    const found = new Set(documents.map((document) => document.path));
+    return {
+      documents,
+      missingPaths: paths.filter((path) => !found.has(path)),
+    };
+  }
 }
 
 function createIntegrationHarness() {

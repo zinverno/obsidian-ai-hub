@@ -1,5 +1,6 @@
 import type {
   IndexDocumentInput,
+  IndexingExecutionOptions,
   IndexingRunResult,
   MarkdownDocumentSource,
 } from "../indexing/types";
@@ -15,6 +16,7 @@ import type {
   SemanticDocumentResult,
   SemanticRuntime,
   SemanticRuntimeStats,
+  SemanticPathChanges,
   SemanticSearchOptions,
 } from "./types";
 
@@ -59,13 +61,39 @@ export class LazySemanticRuntime implements SemanticRuntime {
     return pending;
   }
 
-  async indexVault(): Promise<IndexingRunResult> {
+  async indexVault(
+    options: IndexingExecutionOptions = {},
+  ): Promise<IndexingRunResult> {
     await this.initialize();
     const components = this.requireComponents();
     this.indexing = true;
     try {
       const documents = await components.source.readAll();
-      return await components.indexingService.reconcileAll(documents);
+      return await components.indexingService.reconcileAll(documents, options);
+    } finally {
+      this.indexing = false;
+    }
+  }
+
+  async syncPaths(
+    changes: SemanticPathChanges,
+    options: IndexingExecutionOptions = {},
+  ): Promise<IndexingRunResult> {
+    await this.initialize();
+    const components = this.requireComponents();
+    this.indexing = true;
+    try {
+      const selection = await components.source.readPaths(changes.upsertPaths);
+      const deletePaths = [
+        ...new Set([...changes.deletePaths, ...selection.missingPaths]),
+      ];
+      return await components.indexingService.syncDocuments(
+        {
+          upsertDocuments: selection.documents,
+          deletePaths,
+        },
+        options,
+      );
     } finally {
       this.indexing = false;
     }

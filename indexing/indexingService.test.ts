@@ -758,6 +758,170 @@ describe("IndexingService delta pipeline", () => {
 });
 
 
+describe("IndexingService atomic document-change batches", () => {
+  it("commits rename delete and destination upsert in one generation", async () => {
+    const harness = createHarness();
+    harness.chunker.resolver = ({ path, content }) => [
+      noteChunk(`${path}:0`, path, 0, content, `hash-${content}`),
+    ];
+    await harness.service.initialize();
+    await harness.service.indexDocument(document("A.md", "Alpha"));
+    const generation = harness.store().getStats().generation;
+
+    const result = await harness.service.syncDocuments({
+      upsertDocuments: [document("B.md", "Beta")],
+      deletePaths: ["A.md"],
+    });
+
+    expect(result).toMatchObject({
+      mode: "sync",
+      documentsSeen: 2,
+      documentsChanged: 1,
+      documentsDeleted: 1,
+      chunksEmbedded: 1,
+      chunksDeleted: 1,
+      generationBefore: generation,
+      generationAfter: generation + 1,
+    });
+    expect(harness.store().mutations.at(-1)).toMatchObject({
+      deletePaths: ["A.md"],
+      upserts: [{ path: "B.md" }],
+    });
+    expect(harness.store().listMetadata().map((value) => value.path)).toEqual([
+      "B.md",
+    ]);
+  });
+
+  it("commits multiple creates with at most one generation increment", async () => {
+    const harness = createHarness();
+    harness.chunker.resolver = ({ path, content }) => [
+      noteChunk(path, path, 0, content, `hash-${content}`),
+    ];
+    await harness.service.initialize();
+    const result = await harness.service.syncDocuments({
+      upsertDocuments: [
+        document("B.md", "Beta"),
+        document("A.md", "Alpha"),
+      ],
+      deletePaths: [],
+    });
+    expect(result).toMatchObject({ generationBefore: 0, generationAfter: 1 });
+    expect(harness.store().mutations).toHaveLength(1);
+    expect(harness.store().listMetadata().map((value) => value.path)).toEqual([
+      "A.md",
+      "B.md",
+    ]);
+  });
+
+  it("makes unchanged upserts and missing deletes a true no-op", async () => {
+    const harness = createHarness();
+    harness.chunker.resolver = ({ path, content }) => [
+      noteChunk(path, path, 0, content, `hash-${content}`),
+    ];
+    await harness.service.initialize();
+    await harness.service.indexDocument(document("A.md", "Alpha"));
+    const generation = harness.store().getStats().generation;
+    const mutations = harness.store().mutations.length;
+    const embedCalls = harness.provider.embedCalls.length;
+    const result = await harness.service.syncDocuments({
+      upsertDocuments: [document("A.md", "Alpha")],
+      deletePaths: ["Missing.md"],
+    });
+    expect(result).toMatchObject({
+      documentsChanged: 0,
+      documentsDeleted: 0,
+      chunksEmbedded: 0,
+      generationBefore: generation,
+      generationAfter: generation,
+    });
+    expect(harness.store().mutations).toHaveLength(mutations);
+    expect(harness.provider.embedCalls).toHaveLength(embedCalls);
+  });
+
+  it("deletes paths without invoking the provider", async () => {
+    const harness = createHarness();
+    harness.chunker.resolver = ({ path }) => [
+      noteChunk(path, path, 0, "Alpha"),
+    ];
+    await harness.service.initialize();
+    await harness.service.indexDocument(document("A.md"));
+    const embedCalls = harness.provider.embedCalls.length;
+    await harness.service.syncDocuments({
+      upsertDocuments: [],
+      deletePaths: ["A.md"],
+    });
+    expect(harness.provider.embedCalls).toHaveLength(embedCalls);
+    expect(harness.store().listMetadata()).toEqual([]);
+  });
+
+  it("preserves the committed snapshot on provider failure and then recovers", async () => {
+    const harness = createHarness();
+    harness.chunker.resolver = ({ path, content }) => [
+      noteChunk(path, path, 0, content, `hash-${content}`),
+    ];
+    await harness.service.initialize();
+    await harness.service.indexDocument(document("A.md", "Alpha"));
+    const generation = harness.store().getStats().generation;
+    harness.provider.embedImpl = async () => {
+      throw new Error("Authorization: Bearer secret response body");
+    };
+    await expect(
+      harness.service.syncDocuments({
+        upsertDocuments: [document("B.md", "Beta")],
+        deletePaths: ["A.md"],
+      }),
+    ).rejects.toBeInstanceOf(IndexingProviderError);
+    expect(harness.store().getStats().generation).toBe(generation);
+    expect(harness.store().listMetadata().map((value) => value.path)).toEqual([
+      "A.md",
+    ]);
+
+    harness.provider.embedImpl = async (texts) => texts.map(vectorForText);
+    await harness.service.syncDocuments({
+      upsertDocuments: [document("B.md", "Beta")],
+      deletePaths: ["A.md"],
+    });
+    expect(harness.store().listMetadata().map((value) => value.path)).toEqual([
+      "B.md",
+    ]);
+    expect(harness.store().getStats().generation).toBe(generation + 1);
+  });
+
+  it("checks the commit guard only after embeddings and leaves no mutation", async () => {
+    const harness = createHarness();
+    harness.chunker.resolver = ({ path }) => [
+      noteChunk(path, path, 0, "Alpha"),
+    ];
+    await harness.service.initialize();
+    const shouldCommit = vi.fn(() => false);
+    const result = await harness.service.syncDocuments(
+      {
+        upsertDocuments: [document("A.md")],
+        deletePaths: [],
+      },
+      { shouldCommit },
+    );
+    expect(harness.provider.embedCalls).toEqual([["Alpha"]]);
+    expect(shouldCommit).toHaveBeenCalledOnce();
+    expect(harness.store().mutations).toHaveLength(0);
+    expect(harness.store().listMetadata()).toEqual([]);
+    expect(result).toMatchObject({ generationBefore: 0, generationAfter: 0 });
+  });
+
+  it("rejects an overlapping upsert/delete path before provider work", async () => {
+    const harness = createHarness();
+    await harness.service.initialize();
+    expect(() =>
+      harness.service.syncDocuments({
+        upsertDocuments: [document("A.md")],
+        deletePaths: ["A.md"],
+      }),
+    ).toThrow(IndexingValidationError);
+    expect(harness.provider.embedCalls).toEqual([]);
+    expect(harness.store().mutations).toEqual([]);
+  });
+});
+
 describe("IndexingService provider atomicity", () => {
   it.each([
     ["wrong result count", async () => []],

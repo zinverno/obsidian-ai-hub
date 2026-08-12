@@ -14,7 +14,7 @@ Vault Audit AI helps you:
 - build a local semantic vector index from Markdown notes;
 - find related notes by meaning rather than exact keywords.
 
-Semantic features are opt-in and disabled by default. Indexing is manual in version 1.5.0.
+Semantic features are opt-in and disabled by default. The first semantic index is built only after an explicit user action; once it exists, ordinary Markdown changes are synchronized automatically.
 
 ## Features
 
@@ -25,13 +25,13 @@ Semantic features are opt-in and disabled by default. Indexing is manual in vers
 - Chunk-level incremental indexing based on stable content and metadata hashes.
 - Manual full-vault reconciliation through the command palette.
 - Manual indexing of the current Markdown note.
+- Debounced automatic synchronization for Markdown create, modify, delete, and rename events after the initial index exists.
+- Quiet incremental reconciliation after startup for compatible existing indexes.
 - Search results grouped by note, with the strongest matching sections shown first.
 - Exact vault-relative paths for opening the selected note.
 - Best-effort navigation to the most relevant source section.
 - Explicit clear and rebuild operations with confirmation.
 - Compatibility detection when the embedding provider, model, endpoint, or vector dimensions change.
-
-Automatic indexing on vault file events is not implemented.
 
 ### AI writing tools
 
@@ -79,8 +79,9 @@ The default OpenRouter example is `openai/text-embedding-3-small`. Model availab
 - Semantic features are opt-in and disabled by default.
 - The semantic vector index is stored in `.obsidian/plugins/ai-knowledge-hub/semantic-index/` inside the vault configuration directory.
 - The plugin does not upload stored vectors or their index metadata.
-- When OpenRouter or another remote embedding API is selected, note chunks are sent to that endpoint while indexing, and semantic search queries are sent to it for embedding.
+- When OpenRouter or another remote embedding API is selected, note chunks are sent to that endpoint during the initial index and later automatic synchronization of changed chunks; semantic search queries are also sent to it for embedding.
 - Ollama allows embedding generation to remain local when it is connected to a local Ollama instance.
+- Automatic semantic synchronization never edits Markdown files. It reads the latest Markdown content and changes only the local vector index.
 - Writing, batch, and audit operations send the content required for the requested action to the configured language-model provider.
 - Clipboard insertion writes generated output to the system clipboard.
 
@@ -112,14 +113,20 @@ Do not copy the source TypeScript files into the plugin directory.
 5. Run **Update the Vault semantic index** from the command palette.
 6. Open **Semantic search** from the command palette.
 
+Step 5 is intentionally explicit and is never started automatically. After it succeeds, normal Markdown edits are synchronized in the background without a Notice for each successful update.
+
 ## Semantic index behavior
 
 - The first indexing run chunks the selected Markdown notes and generates embeddings.
-- Later runs compare chunk metadata and content hashes; unchanged chunks are not embedded again.
+- Create and modify events are debounced and coalesced; file content is read at flush time so the latest saved version is indexed.
+- Modify synchronization compares chunk metadata and content hashes; unchanged chunks are not embedded again.
+- Delete removes every indexed chunk for that path without an embedding request. Rename deletes the old path and indexes the new path in one logical mutation.
+- On startup, a compatible existing index is incrementally reconciled with changes made while Obsidian or the plugin was closed. A missing index is not created automatically.
 - The index persists across plugin and Obsidian restarts.
 - Changing only an API key does not change the embedding space and does not require a rebuild.
 - Changing the provider, model, normalized endpoint, or vector dimensions can make the existing index incompatible and require **Rebuild the semantic index**.
 - **Clear the semantic index** replaces the current compatible index with an empty compatible index.
+- After Clear, automatic synchronization remains suspended across restarts until an explicit index or rebuild operation succeeds, so queued file events cannot repopulate the cleared index.
 - **Rebuild the semantic index** explicitly removes semantic index artifacts and regenerates the full index after confirmation.
 - Clear and rebuild affect only semantic index files. They never delete or modify Markdown notes.
 
@@ -145,8 +152,8 @@ Do not copy the source TypeScript files into the plugin directory.
 
 ## Current limitations
 
-- Semantic indexing is manual in version 1.5.0.
-- Automatic synchronization for vault create, modify, delete, and rename events is not included yet.
+- The initial semantic index, Clear, and Rebuild remain explicit user operations.
+- Automatic synchronization covers Markdown notes only; attachments, Canvas files, images, and other file types are ignored.
 - The vector store does not use an ANN or HNSW index.
 - Similarity search performs a local linear scan and is intended for small and medium personal vaults.
 - Search quality depends on the selected embedding model and the language and structure of the notes.
@@ -180,7 +187,7 @@ Semantic search
 Grouped note results
 ```
 
-Stable chunk hashes drive incremental deltas so unchanged chunks are reused. The vector store uses guarded temporary-file replacement, backup-aware recovery, and one shared store per semantic index path in the plugin runtime. Clear and rebuild are explicit operations that do not modify source notes.
+Stable chunk hashes drive incremental deltas so unchanged chunks are reused. A debounced event coordinator coalesces Markdown path changes, while startup reconciliation catches offline changes. Manual and automatic indexing share one mutation queue; rename batches reach the vector store as one durable mutation. The vector store uses guarded temporary-file replacement, backup-aware recovery, and one shared store per semantic index path in the plugin runtime. Clear and rebuild are explicit operations that do not modify source notes.
 
 ## License
 
