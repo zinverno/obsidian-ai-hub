@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("obsidian", () => ({
   App: class {},
@@ -27,6 +27,7 @@ vi.mock("obsidian", () => ({
 import type { EmbeddingSettings } from "../embeddings/types";
 import { buildEmbeddingSpaceId } from "../indexing";
 import { TFile } from "obsidian";
+import type { Command } from "obsidian";
 import { SemanticCompatibilityError } from "./errors";
 import { SemanticSourceNotIndexedError } from "./errors";
 import { AsyncReadWriteBarrier } from "./asyncReadWriteBarrier";
@@ -37,6 +38,11 @@ import type {
   SemanticControllerDependencies,
 } from "./obsidianSemanticController";
 import type { SemanticRuntime } from "./types";
+
+type RuntimeFactory = NonNullable<
+  SemanticControllerDependencies["runtimeFactory"]
+>;
+type RuntimeFactoryInput = Parameters<RuntimeFactory>[0];
 
 const RESULT = {
   mode: "reconcile" as const,
@@ -135,10 +141,7 @@ function createHarness(
   settings = semantic(),
   dependencyOverrides: SemanticControllerDependencies = {},
 ) {
-  const commands: Array<{
-    id: string;
-    callback?: () => unknown;
-  }> = [];
+  const commands: Command[] = [];
   const notices: string[] = [];
   const activeFile = Object.assign(Object.create(TFile.prototype), {
     path: "Alpha.md",
@@ -169,14 +172,14 @@ function createHarness(
       semantic: settings,
       semanticAutoSyncSuspended: false,
     },
-    addCommand: vi.fn((command) => {
+    addCommand: vi.fn((command: Command) => {
       commands.push(command);
       return command;
     }),
     saveSettings: vi.fn(async () => undefined),
   };
   const runtimes: SemanticRuntime[] = [];
-  const runtimeFactory = vi.fn((_input: any) => {
+  const runtimeFactory = vi.fn((_input: RuntimeFactoryInput) => {
     const runtime = fakeRuntime();
     runtimes.push(runtime);
     return runtime;
@@ -233,7 +236,15 @@ function createHarness(
 }
 
 describe("ObsidianSemanticController commands and lazy behavior", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubGlobal("window", {
+      setTimeout: (callback: () => void, delayMs: number) =>
+        setTimeout(callback, delayMs) as unknown as number,
+      clearTimeout: (timer: number) => clearTimeout(timer),
+    });
+  });
+  afterEach(() => vi.unstubAllGlobals());
 
   it("registers all semantic commands without runtime or Vault reads", () => {
     const harness = createHarness();
@@ -349,11 +360,16 @@ describe("ObsidianSemanticController commands and lazy behavior", () => {
 
   it("runs a confirmed full index with an immutable settings snapshot", async () => {
     const harness = createHarness();
+    harness.app.vault.configDir = ".custom-config";
     await harness.controller.indexVault();
     expect(harness.runtimeFactory).toHaveBeenCalledOnce();
     const input = harness.runtimeFactory.mock.calls[0][0];
     expect(input.settings).toEqual(harness.plugin.settings.semantic);
     expect(input.settings).not.toBe(harness.plugin.settings.semantic);
+    expect(input.basePath).toBe(
+      ".custom-config/plugins/ai-knowledge-hub/semantic-index",
+    );
+    expect(input.basePath).not.toContain(".obsidian/");
     expect(harness.runtimes[0].indexVault).toHaveBeenCalledOnce();
   });
 
@@ -472,7 +488,7 @@ describe("ObsidianSemanticController commands and lazy behavior", () => {
     });
     const harness = createHarness(semantic(), {
       probeIndex,
-      runtimeFactory: runtimeFactory as never,
+      runtimeFactory,
     });
 
     const staleRefresh = harness.controller.refreshSemanticStatus();

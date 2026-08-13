@@ -1134,15 +1134,15 @@ export class SingleAuditProgressModal extends Modal {
 
   private renderStats(): void {
     this.statsEl.empty();
-    this.statsEl.createEl("span", {
+    this.statsEl.createSpan({
       text: `✓ ${this.counts.done}`,
       cls: "ai-hub-stat-done",
     });
-    this.statsEl.createEl("span", {
+    this.statsEl.createSpan({
       text: `⟳ ${this.counts.skipped}`,
       cls: "ai-hub-stat-skip",
     });
-    this.statsEl.createEl("span", {
+    this.statsEl.createSpan({
       text: `✗ ${this.counts.error}`,
       cls: "ai-hub-stat-error",
     });

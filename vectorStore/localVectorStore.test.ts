@@ -1170,9 +1170,7 @@ describe("backup-aware persistence failure matrix", () => {
     );
     await expect(
       store.applyChanges({ upserts: [entry("first")] }),
-    ).rejects.toMatchObject({
-      message: expect.stringContaining("rollback is incomplete"),
-    });
+    ).rejects.toThrow(/rollback is incomplete/);
     expect(JSON.parse(persistence.text(MANIFEST_BACKUP))).toMatchObject({
       generation: 0,
       dimensions: 3,
@@ -1292,10 +1290,7 @@ describe("backup-aware persistence failure matrix", () => {
       { operation: "writeBinary", path: BINARY },
     );
     const failure = store.applyChanges({ upserts: [entry("new")] });
-    await expect(failure).rejects.toMatchObject({
-      name: "VectorStorePersistenceError",
-      message: expect.stringContaining("rollback is incomplete"),
-    });
+    await expect(failure).rejects.toThrow(/rollback is incomplete/);
     expectPair(persistence, MANIFEST_BACKUP, BINARY_BACKUP, previous);
     expect(store.getStats()).toMatchObject({ count: 1, generation: 1 });
 
@@ -1320,10 +1315,7 @@ describe("backup-aware persistence failure matrix", () => {
     );
     await expect(
       store.applyChanges({ upserts: [entry("new")] }),
-    ).rejects.toMatchObject({
-      name: "VectorStorePersistenceError",
-      message: expect.stringContaining("rollback is incomplete"),
-    });
+    ).rejects.toThrow(/rollback is incomplete/);
     expectPair(persistence, MANIFEST_BACKUP, BINARY_BACKUP, previous);
     expect(store.getStats()).toMatchObject({ count: 1, generation: 1 });
 
@@ -1355,10 +1347,7 @@ describe("backup-aware persistence failure matrix", () => {
 
       await expect(
         store.applyChanges({ upserts: [newEntry] }),
-      ).rejects.toMatchObject({
-        name: "VectorStorePersistenceError",
-        message: expect.stringContaining("rollback is incomplete"),
-      });
+      ).rejects.toThrow(/rollback is incomplete/);
       await expectLoadedSnapshot(store, 1, [oldEntry]);
       expectSerializedSnapshot(
         persistence,

@@ -32,6 +32,8 @@ function createHarness(
       await flush?.(batch);
     },
     onError: (error) => errors.push(error),
+    setTimer: (callback, delayMs) => setTimeout(callback, delayMs) as unknown as number,
+    clearTimer: (timer) => clearTimeout(timer),
   });
   return { scheduler, batches, errors };
 }

@@ -68,31 +68,31 @@ export interface SemanticPathChanges {
 }
 
 export interface SemanticRuntime {
-  initialize(): Promise<void>;
-  indexVault(options?: IndexingExecutionOptions): Promise<IndexingRunResult>;
-  indexDocument(document: IndexDocumentInput): Promise<IndexingRunResult>;
-  syncPaths(
+  initialize: () => Promise<void>;
+  indexVault: (options?: IndexingExecutionOptions) => Promise<IndexingRunResult>;
+  indexDocument: (document: IndexDocumentInput) => Promise<IndexingRunResult>;
+  syncPaths: (
     changes: SemanticPathChanges,
     options?: IndexingExecutionOptions,
-  ): Promise<IndexingRunResult>;
-  search(
+  ) => Promise<IndexingRunResult>;
+  search: (
     query: string,
     options?: SemanticSearchOptions,
-  ): Promise<SemanticDocumentResult[]>;
+  ) => Promise<SemanticDocumentResult[]>;
   /**
    * Rejects with SemanticSourceNotIndexedError when a non-empty compatible
    * index does not contain the requested source; UI boundaries render that
    * typed domain rejection as a controlled localized state.
    */
-  findSimilarNotes(
+  findSimilarNotes: (
     sourcePath: string,
     options?: SemanticSimilarNotesOptions,
-  ): Promise<SemanticDocumentSimilarity[]>;
-  findPotentialDuplicates(
+  ) => Promise<SemanticDocumentSimilarity[]>;
+  findPotentialDuplicates: (
     options?: SemanticDuplicateOptions,
-  ): Promise<SemanticDuplicatePair[]>;
-  clear(): Promise<void>;
-  getStats(): SemanticRuntimeStats;
+  ) => Promise<SemanticDuplicatePair[]>;
+  clear: () => Promise<void>;
+  getStats: () => SemanticRuntimeStats;
 }
 
 export type SemanticStatusKind =

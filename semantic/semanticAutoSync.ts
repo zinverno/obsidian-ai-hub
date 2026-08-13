@@ -6,11 +6,11 @@ export interface SemanticAutoSyncBatch {
 }
 
 export interface SemanticAutoSyncOptions {
-  flush(batch: SemanticAutoSyncBatch): Promise<void>;
-  onError?(error: unknown): void;
+  flush: (batch: SemanticAutoSyncBatch) => Promise<void>;
+  onError?: (error: unknown) => void;
   debounceMs?: number;
-  setTimer?(callback: () => void, delayMs: number): number;
-  clearTimer?(timer: number): void;
+  setTimer: (callback: () => void, delayMs: number) => number;
+  clearTimer: (timer: number) => void;
 }
 
 interface PendingChanges {
@@ -98,13 +98,8 @@ export class SemanticAutoSync {
     this.flushBatch = options.flush;
     this.onError = options.onError ?? (() => undefined);
     this.debounceMs = debounceMs;
-    this.setTimer =
-      options.setTimer ??
-      ((callback, delayMs) =>
-        globalThis.setTimeout(callback, delayMs) as unknown as number);
-    this.clearTimer =
-      options.clearTimer ??
-      ((timer) => globalThis.clearTimeout(timer));
+    this.setTimer = options.setTimer;
+    this.clearTimer = options.clearTimer;
   }
 
   upsert(path: string): void {

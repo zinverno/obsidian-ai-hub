@@ -59,6 +59,24 @@ function request(create: () => FakeStore, embeddingSpaceId = "space-a") {
   };
 }
 
+async function caughtRejection(promise: Promise<void>): Promise<unknown> {
+  try {
+    await promise;
+  } catch (error) {
+    return error;
+  }
+  throw new Error("Expected initialization to reject.");
+}
+
+function throwSynchronously(reason: unknown): never {
+  const iterator = (function* () {
+    yield undefined;
+  })();
+  iterator.next();
+  iterator.throw(reason);
+  throw new Error("Generator unexpectedly accepted a thrown value.");
+}
+
 describe("SemanticStoreRegistry", () => {
   it("returns one object identity for one compatible basePath", () => {
     const registry = new SemanticStoreRegistry();
@@ -136,6 +154,75 @@ describe("SemanticStoreRegistry", () => {
     );
     await expect(recovered.initialize()).resolves.toBeUndefined();
     expect(registry.size).toBe(1);
+  });
+
+  it("normalizes a synchronous non-Error initialization failure", async () => {
+    const registry = new SemanticStoreRegistry();
+    const failed = new FakeStore();
+    failed.initializeImpl = () =>
+      throwSynchronously("sk-private synchronous payload");
+    const first = registry.getOrCreateStore(request(() => failed));
+
+    const error = await caughtRejection(first.initialize());
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe(
+      "Vector store initialization failed.",
+    );
+    expect(String(error)).not.toContain("sk-private");
+    expect(registry.size).toBe(0);
+  });
+
+  it("normalizes an asynchronous non-Error failure and permits retry", async () => {
+    const registry = new SemanticStoreRegistry();
+    const failed = new FakeStore();
+    failed.initializeImpl = vi
+      .fn<() => Promise<void>>()
+      .mockRejectedValue("sk-private asynchronous payload");
+    const first = registry.getOrCreateStore(request(() => failed));
+
+    const error = await caughtRejection(first.initialize());
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe(
+      "Vector store initialization failed.",
+    );
+    expect(String(error)).not.toContain("sk-private");
+    expect(registry.size).toBe(0);
+
+    const recovered = new FakeStore();
+    const second = registry.getOrCreateStore(request(() => recovered));
+    expect(second).not.toBe(first);
+    await expect(second.initialize()).resolves.toBeUndefined();
+    expect(registry.size).toBe(1);
+  });
+
+  it("does not serialize an asynchronously rejected object payload", async () => {
+    const registry = new SemanticStoreRegistry();
+    const failed = new FakeStore();
+    failed.initializeImpl = vi
+      .fn<() => Promise<void>>()
+      .mockRejectedValue({ apiKey: "sk-private object payload" });
+    const first = registry.getOrCreateStore(request(() => failed));
+
+    const error = await caughtRejection(first.initialize());
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe(
+      "Vector store initialization failed.",
+    );
+    expect(String(error)).not.toContain("apiKey");
+    expect(String(error)).not.toContain("sk-private");
+  });
+
+  it("preserves an expected Error from asynchronous initialization", async () => {
+    const registry = new SemanticStoreRegistry();
+    const controlled = new Error("expected controlled error");
+    const failed = new FakeStore();
+    failed.initializeImpl = async () => {
+      throw controlled;
+    };
+    const first = registry.getOrCreateStore(request(() => failed));
+
+    await expect(first.initialize()).rejects.toBe(controlled);
+    expect(registry.size).toBe(0);
   });
 
   it("deletes only the normalized requested entry", () => {

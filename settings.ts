@@ -332,7 +332,7 @@ export class AIHubSettingTab extends PluginSettingTab {
     // ── API Key (только если нужен) ───────────────────────────────────
     if (profile.requiresApiKey || provider === "custom") {
       const keySetting = new Setting(el)
-        .setName("API Key")
+        .setName("API key")
         .setDesc(
           profile.requiresApiKey
             ? tr("Хранится локально")

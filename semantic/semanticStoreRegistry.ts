@@ -36,6 +36,12 @@ interface MutableEntry<TStore extends VectorStore> {
   initializationPromise: Promise<void> | null;
 }
 
+function normalizeInitializationError(error: unknown): Error {
+  return error instanceof Error
+    ? error
+    : new Error("Vector store initialization failed.");
+}
+
 /**
  * Controller-owned registry for the one mutable VectorStore associated with a
  * normalized semantic storage path. The registry itself performs no I/O.
@@ -88,7 +94,9 @@ export class SemanticStoreRegistry {
   private installInitializationGate<TStore extends VectorStore>(
     entry: MutableEntry<TStore>,
   ): void {
-    const initialize = entry.store.initialize.bind(entry.store);
+    const store = entry.store;
+    const originalInitialize: VectorStore["initialize"] = store.initialize;
+    const initialize = (): Promise<void> => originalInitialize.call(store);
     entry.store.initialize = (): Promise<void> => {
       if (entry.lifecycle === "ready") return Promise.resolve();
       if (entry.initializationPromise) return entry.initializationPromise;
@@ -96,12 +104,14 @@ export class SemanticStoreRegistry {
       entry.lifecycle = "initializing";
       let pending: Promise<void>;
       try {
-        pending = initialize();
+        pending = initialize().catch((error: unknown) => {
+          throw normalizeInitializationError(error);
+        });
       } catch (error) {
         if (this.entries.get(entry.basePath) === entry) {
           this.entries.delete(entry.basePath);
         }
-        return Promise.reject(error);
+        return Promise.reject(normalizeInitializationError(error));
       }
       entry.initializationPromise = pending;
       void pending.then(

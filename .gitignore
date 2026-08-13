@@ -1,5 +1,9 @@
 node_modules/
 *.js
 *.js.map
+/main.d.ts
+/main.d.ts.map
+/settings.d.ts
+/settings.d.ts.map
 .esbuild
 .DS_Store

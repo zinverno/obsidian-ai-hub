@@ -1,23 +1,23 @@
 {
   "compilerOptions": {
     "target": "ES2020",
-    "module": "CommonJS",
+    "module": "ESNext",
     "lib": ["DOM", "ES5", "ES6", "ES2020"],
-    "allowJs": true,
-    "moduleResolution": "bundler",
+    "moduleResolution": "node",
     "types": ["node"],
     "forceConsistentCasingInFileNames": true,
     "strict": false,
     "strictNullChecks": true,
+    "strictBindCallApply": true,
     "noImplicitAny": false,
     "inlineSourceMap": true,
     "inlineSources": true,
     "isolatedModules": true,
-    "rootDir": ".",
-    "outDir": ".",
+    "noEmit": true,
     "resolveJsonModule": true,
     "esModuleInterop": true,
-    "ignoreDeprecations": "6.0"
+    "skipLibCheck": true,
+    "useUnknownInCatchVariables": true
   },
   "include": ["**/*.ts"],
   "exclude": ["node_modules", "*.js"]

@@ -1,5 +1,4 @@
 import esbuild from 'esbuild';
-import { builtinModules } from 'module';
 
 const production = process.argv.includes('production');
 
@@ -12,7 +11,7 @@ async function main() {
     minifyWhitespace: production,
     minifySyntax: production,
     minifyIdentifiers: production,
-    platform: 'node',
+    platform: 'browser',
     format: 'cjs',
     sourcemap: production ? false : 'inline',
     outfile: 'main.js',

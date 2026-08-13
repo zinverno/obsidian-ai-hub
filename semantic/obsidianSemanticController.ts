@@ -165,12 +165,12 @@ const SHARED_SEMANTIC_MUTATION_STATE: unique symbol = Symbol.for(
   "vault-audit-ai.semantic-mutation-state.v1",
 ) as never;
 
-type GlobalWithSemanticMutationState = typeof globalThis & {
+type WindowWithSemanticMutationState = Window & {
   [SHARED_SEMANTIC_MUTATION_STATE]?: SharedSemanticMutationState;
 };
 
 function sharedSemanticMutationState(): SharedSemanticMutationState {
-  const root = globalThis as GlobalWithSemanticMutationState;
+  const root = window as WindowWithSemanticMutationState;
   const existing = root[SHARED_SEMANTIC_MUTATION_STATE];
   if (existing) return existing;
   const created: SharedSemanticMutationState = { queues: new Map() };
@@ -278,6 +278,8 @@ export class ObsidianSemanticController {
       debounceMs: dependencies.autoSyncDebounceMs,
       flush: (batch) => this.flushAutomaticSync(batch),
       onError: (error) => this.handleAutomaticSyncError(error),
+      setTimer: (callback, delayMs) => window.setTimeout(callback, delayMs),
+      clearTimer: (timer) => window.clearTimeout(timer),
     });
     // The state machine remains dormant until Vault listeners are registered.
     this.autoSync.reconfigure({ paused: true, preservePending: false });

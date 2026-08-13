@@ -2,9 +2,14 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => {
+  interface FakeEvent {
+    key?: string;
+    preventDefault?: () => void;
+  }
+
   class FakeElement {
     readonly children: FakeElement[] = [];
-    readonly listeners = new Map<string, Array<(event: any) => void>>();
+    readonly listeners = new Map<string, Array<(event: FakeEvent) => void>>();
     tag = "div";
     cls = "";
     text = "";
@@ -71,13 +76,13 @@ const mocks = vi.hoisted(() => {
       this.attributes.set(key, value);
     }
 
-    addEventListener(type: string, listener: (event: any) => void) {
+    addEventListener(type: string, listener: (event: FakeEvent) => void) {
       const listeners = this.listeners.get(type) ?? [];
       listeners.push(listener);
       this.listeners.set(type, listeners);
     }
 
-    trigger(type: string, event: any = {}) {
+    trigger(type: string, event: FakeEvent = {}) {
       for (const listener of this.listeners.get(type) ?? []) {
         listener({
           key: event.key,
@@ -107,7 +112,9 @@ const mocks = vi.hoisted(() => {
     }
   }
 
-  class TFile {}
+  class TFile {
+    path = "";
+  }
   class MarkdownView {
     editor = {
       setCursor: vi.fn(),
@@ -122,19 +129,21 @@ const mocks = vi.hoisted(() => {
     }
   }
   class Modal {
-    app: any;
+    app: unknown;
     titleEl = new FakeElement();
     contentEl = new FakeElement();
     closed = false;
-    constructor(app: any) {
+    constructor(app: unknown) {
       this.app = app;
     }
+    onOpen() {}
+    onClose() {}
     open() {
-      (this as any).onOpen();
+      this.onOpen();
     }
     close() {
       this.closed = true;
-      (this as any).onClose();
+      this.onClose();
     }
   }
   return { FakeElement, TFile, MarkdownView, Notice, Modal };
@@ -194,16 +203,18 @@ function result(preview?: string): SemanticDocumentResult {
 }
 
 function harness(results = [result("safe preview")]) {
-  const file = Object.assign(Object.create(mocks.TFile.prototype), {
-    path: "Folder/Alpha.md",
-  });
+  const file = new mocks.TFile();
+  file.path = "Folder/Alpha.md";
+  const getFileByPath = vi.fn<
+    (path: string) => InstanceType<typeof mocks.TFile> | null
+  >(() => file);
   const view = new mocks.MarkdownView();
   const leaf = {
     view,
     openFile: vi.fn(async () => undefined),
   };
   const app = {
-    vault: { getFileByPath: vi.fn(() => file) },
+    vault: { getFileByPath },
     workspace: { getLeaf: vi.fn(() => leaf) },
   };
   const delegate = {
@@ -410,12 +421,12 @@ function discoveryHarness() {
       rightMatches: [discoveryMatch("Folder/B.md", 18)],
     },
   ];
-  const files = new Map(
-    ["Folder/Near.md", "A.md", "Folder/B.md"].map((path) => [
-      path,
-      Object.assign(Object.create(mocks.TFile.prototype), { path }),
-    ]),
-  );
+  const files = new Map<string, InstanceType<typeof mocks.TFile>>();
+  for (const path of ["Folder/Near.md", "A.md", "Folder/B.md"]) {
+    const file = new mocks.TFile();
+    file.path = path;
+    files.set(path, file);
+  }
   const view = new mocks.MarkdownView();
   const leaf = {
     view,
