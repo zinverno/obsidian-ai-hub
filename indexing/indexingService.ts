@@ -315,7 +315,7 @@ export class IndexingService {
       throw new IndexingValidationError("Document paths must be an array.");
     }
     const deletePathSet = new Set<string>();
-    for (const path of [...changes.deletePaths]) {
+    for (const path of changes.deletePaths) {
       deletePathSet.add(validatePath(path));
     }
     for (const document of prepared) {
@@ -337,7 +337,7 @@ export class IndexingService {
       throw new IndexingValidationError("Document paths must be an array.");
     }
     const unique = new Set<string>();
-    for (const path of [...paths]) unique.add(validatePath(path));
+    for (const path of paths) unique.add(validatePath(path));
     const preparedPaths = [...unique].sort(compareStrings);
     return this.enqueue(() => this.executeDelete(preparedPaths));
   }
@@ -444,7 +444,7 @@ export class IndexingService {
       cache: IndexDocumentInput["cache"];
     }> = [];
     const paths = new Set<string>();
-    for (const rawDocument of [...documents]) {
+    for (const rawDocument of documents) {
       if (!isObject(rawDocument)) {
         throw new IndexingValidationError("Document input is invalid.");
       }

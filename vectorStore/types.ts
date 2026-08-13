@@ -56,7 +56,7 @@ export interface VectorStoreSnapshot {
 }
 
 export interface VectorStore {
-  initialize(): Promise<void>;
+  initialize: (this: VectorStore) => Promise<void>;
 
   listMetadata(): VectorChunkMetadata[];
 

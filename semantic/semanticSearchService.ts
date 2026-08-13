@@ -260,7 +260,7 @@ export class SemanticSearchService {
     if (!Array.isArray(output) || output.length !== 1) {
       throw new SemanticProviderError();
     }
-    const rawVector = output[0];
+    const rawVector: unknown = output[0];
     if (
       !(rawVector instanceof Float32Array) ||
       rawVector.length !== this.dimensions

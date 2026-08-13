@@ -8,9 +8,16 @@ import {
   it,
   vi,
 } from "vitest";
+import type {
+  DataAdapter,
+  RequestUrlParam,
+  RequestUrlResponse,
+} from "obsidian";
 
 const obsidianMocks = vi.hoisted(() => ({
-  requestUrl: vi.fn(),
+  requestUrl: vi.fn<
+    (request: RequestUrlParam) => Promise<RequestUrlResponse>
+  >(),
 }));
 
 vi.mock("obsidian", () => ({
@@ -89,9 +96,9 @@ class MemoryDataAdapter {
     this.files.set(path, { kind: "text", value });
   }
 
-  async writeBinary(path: string, value: ArrayBuffer): Promise<void> {
+  writeBinary = async (path: string, value: ArrayBuffer): Promise<void> => {
     this.files.set(path, { kind: "binary", value: value.slice(0) });
-  }
+  };
 
   async mkdir(path: string): Promise<void> {
     this.directories.add(path);
@@ -164,9 +171,26 @@ function hasRequestText(text: string): boolean {
   return embeddingCalls.some((call) => call.texts.includes(text));
 }
 
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return (
+    Array.isArray(value) &&
+    value.every((item: unknown) => typeof item === "string")
+  );
+}
+
 function installEmbeddingEndpoint(): void {
-  obsidianMocks.requestUrl.mockImplementation(async (request: any) => {
-    const payload = JSON.parse(request.body) as { input: string[] };
+  obsidianMocks.requestUrl.mockImplementation(async (request) => {
+    if (typeof request.body !== "string") {
+      throw new Error("Expected a JSON request body.");
+    }
+    const payload = JSON.parse(request.body) as unknown;
+    if (!isObject(payload) || !isStringArray(payload.input)) {
+      throw new Error("Expected an embedding input array.");
+    }
     const call: EmbeddingCall = {
       url: request.url,
       authorization: request.headers?.Authorization ?? "",
@@ -181,14 +205,18 @@ function installEmbeddingEndpoint(): void {
       blocker.gate.markEntered();
       await blocker.gate.wait;
     }
+    const json = {
+      data: call.texts.map((text, index) => ({
+        index,
+        embedding: vectorFor(text),
+      })),
+    };
     return {
       status: 200,
-      text: JSON.stringify({
-        data: call.texts.map((text, index) => ({
-          index,
-          embedding: vectorFor(text),
-        })),
-      }),
+      headers: {},
+      arrayBuffer: new ArrayBuffer(0),
+      json,
+      text: JSON.stringify(json),
     };
   });
 }
@@ -280,7 +308,10 @@ function createHarness(
   }) as TFile;
   const files = new Map<string, TFile>([[file.path, file]]);
   const contents = new Map<string, string>([[file.path, content]]);
-  const vaultListeners = new Map<string, Array<(...args: any[]) => void>>();
+  const vaultListeners = new Map<
+    string,
+    Array<(...args: unknown[]) => void>
+  >();
   const layoutReadyCallbacks: Array<() => void> = [];
   let durableAutoSyncSuspended = autoSyncSuspended;
   const app = {
@@ -294,7 +325,7 @@ function createHarness(
         if (value === undefined) throw new Error("missing file");
         return value;
       }),
-      on: vi.fn((name: string, callback: (...args: any[]) => void) => {
+      on: vi.fn((name: string, callback: (...args: unknown[]) => void) => {
         const callbacks = vaultListeners.get(name) ?? [];
         callbacks.push(callback);
         vaultListeners.set(name, callbacks);
@@ -326,7 +357,10 @@ function createHarness(
         pluginSettings.semanticAutoSyncSuspended === true;
     }),
   };
-  const resetStorage = vi.fn(async (targetAdapter, basePath) => {
+  const resetStorage = vi.fn(async (
+    targetAdapter: DataAdapter,
+    basePath: string,
+  ) => {
     resetEvents.push("reset-start");
     await resetSemanticStorage(targetAdapter, basePath);
     resetEvents.push("reset-end");
@@ -362,7 +396,7 @@ function createHarness(
     fireLayoutReady() {
       for (const callback of layoutReadyCallbacks) callback();
     },
-    emit(name: string, ...args: any[]) {
+    emit(name: string, ...args: unknown[]) {
       for (const callback of vaultListeners.get(name) ?? []) callback(...args);
     },
     createFile(path: string, value: string): TFile {
@@ -415,8 +449,9 @@ function createHarness(
 
 beforeAll(() => {
   vi.stubGlobal("window", {
-    setTimeout: globalThis.setTimeout.bind(globalThis),
-    clearTimeout: globalThis.clearTimeout.bind(globalThis),
+    setTimeout: (callback: () => void, delayMs: number) =>
+      setTimeout(callback, delayMs) as unknown as number,
+    clearTimeout: (timer: number) => clearTimeout(timer),
   });
 });
 
@@ -652,8 +687,9 @@ describe("semantic read/write barrier with real services and store", () => {
     const harness = createHarness();
     await harness.controller.indexVault();
     const store = harness.registry.peek(BASE_PATH)?.store as LocalVectorStore;
-    const originalClear = store.clear.bind(store);
-    vi.spyOn(store, "clear").mockRejectedValueOnce(new Error("clear failed"));
+    const clearSpy = vi
+      .spyOn(store, "clear")
+      .mockRejectedValueOnce(new Error("clear failed"));
 
     await harness.controller.clearIndex();
     expect(harness.controller.getSemanticStatus().kind).toBe("error");
@@ -664,7 +700,8 @@ describe("semantic read/write barrier with real services and store", () => {
     await harness.controller.indexCurrentNote();
     expect(store.getStats()).toMatchObject({ count: 1, generation: 2 });
     expect(harness.controller.getSemanticStatus().kind).toBe("ready");
-    await originalClear();
+    clearSpy.mockRestore();
+    await store.clear();
   });
 });
 
@@ -722,19 +759,19 @@ describe("one LocalVectorStore per basePath across settings epochs", () => {
   it.each([
     {
       name: "model",
-      change(settings: EmbeddingSettings) {
+      change: (settings: EmbeddingSettings) => {
         settings.embeddingModel = "model-b";
       },
     },
     {
       name: "base URL",
-      change(settings: EmbeddingSettings) {
+      change: (settings: EmbeddingSettings) => {
         settings.embeddingBaseUrl = "https://other.example.test/v1";
       },
     },
     {
       name: "provider",
-      change(settings: EmbeddingSettings) {
+      change: (settings: EmbeddingSettings) => {
         settings.embeddingProvider = "openrouter";
       },
     },
@@ -1564,9 +1601,9 @@ describe("automatic semantic index synchronization", () => {
     harness.modifyFile("Alpha.md", "# Alpha\n\nbeta disposed pending");
     const timer = vi.advanceTimersByTimeAsync(10);
     await pendingEmbedding.entered;
-    harness.controller.dispose();
+    const disposal = harness.controller.dispose();
     pendingEmbedding.release();
-    await timer;
+    await Promise.all([timer, disposal]);
     for (let index = 0; index < 40; index++) await Promise.resolve();
     expect(store?.getStats().generation).toBe(generation);
     expect(store?.listMetadata()[0].preview).toContain("alpha old committed");
@@ -1577,7 +1614,7 @@ describe("automatic semantic index synchronization", () => {
     first.registerAutomaticSync();
     await first.controller.indexVault();
     const persistenceGate = manualGate();
-    const originalWriteBinary = first.adapter.writeBinary.bind(first.adapter);
+    const originalWriteBinary = first.adapter.writeBinary;
     let blockNextTempWrite = true;
     let activeWrites = 0;
     let maxConcurrentWrites = 0;

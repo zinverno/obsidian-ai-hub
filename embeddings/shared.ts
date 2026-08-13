@@ -192,7 +192,7 @@ export function validateEmbeddingVectors(
 
       const vector: number[] = [];
       for (let valueIndex = 0; valueIndex < rawVector.length; valueIndex++) {
-        const value = rawVector[valueIndex];
+        const value: unknown = rawVector[valueIndex];
         if (typeof value !== "number" || !Number.isFinite(value)) {
           throw new Error(
             tr("Embedding #{vector} содержит некорректное число в позиции {value}.", {

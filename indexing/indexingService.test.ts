@@ -1259,14 +1259,14 @@ describe("Obsidian adapters and browser boundaries", () => {
     const source = new ObsidianMarkdownDocumentSource({
       vault: {
         getMarkdownFiles: () => files as never[],
-        cachedRead: async (file) => {
+        cachedRead: async (file: { path: string }) => {
           reads.push(file.path);
           return `content:${file.path}`;
         },
         on: eventSubscriptions,
       } as never,
       metadataCache: {
-        getFileCache: (file) => caches.get(file.path) as never,
+        getFileCache: (file: { path: string }) => caches.get(file.path) as never,
         on: eventSubscriptions,
       } as never,
     });

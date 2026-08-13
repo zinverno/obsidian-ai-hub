@@ -146,8 +146,19 @@ function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.length > 0;
 }
 
+function isStringArray(value: unknown): value is string[] {
+  return (
+    Array.isArray(value) &&
+    value.every((item: unknown) => typeof item === "string")
+  );
+}
+
 function isNonNegativeSafeInteger(value: unknown): value is number {
-  return Number.isSafeInteger(value) && (value as number) >= 0;
+  return (
+    typeof value === "number" &&
+    Number.isSafeInteger(value) &&
+    value >= 0
+  );
 }
 
 function cloneMetadata(metadata: VectorChunkMetadata): VectorChunkMetadata {
@@ -173,8 +184,7 @@ function metadataProblem(value: unknown): string | null {
   if (!isNonEmptyString(value.id)) return "id must be a non-empty string";
   if (!isNonEmptyString(value.path)) return "path must be a non-empty string";
   if (
-    !Array.isArray(value.headingPath) ||
-    !value.headingPath.every((part) => typeof part === "string")
+    !isStringArray(value.headingPath)
   ) {
     return "headingPath must be an array of strings";
   }
@@ -208,7 +218,7 @@ function validatedMetadata(value: unknown): VectorChunkMetadata {
   if (problem) {
     throw new VectorValidationError(`Invalid vector metadata: ${problem}.`);
   }
-  return cloneMetadata(value as unknown as VectorChunkMetadata);
+  return cloneMetadata(value as VectorChunkMetadata);
 }
 
 function loadedMetadata(value: unknown): VectorChunkMetadata {
@@ -218,7 +228,7 @@ function loadedMetadata(value: unknown): VectorChunkMetadata {
       `Vector manifest contains invalid metadata: ${problem}.`,
     );
   }
-  return cloneMetadata(value as unknown as VectorChunkMetadata);
+  return cloneMetadata(value as VectorChunkMetadata);
 }
 
 function normalizedVectorCopy(
@@ -362,7 +372,10 @@ function parseManifest(raw: string): VectorStoreManifest {
       "Vector manifest root must be an object.",
     );
   }
-  if (!Number.isSafeInteger(value.schemaVersion)) {
+  if (
+    typeof value.schemaVersion !== "number" ||
+    !Number.isSafeInteger(value.schemaVersion)
+  ) {
     throw new VectorStoreCorruptionError(
       "Vector manifest schemaVersion is invalid.",
     );
@@ -374,16 +387,17 @@ function parseManifest(raw: string): VectorStoreManifest {
   }
   if (
     !isNonNegativeSafeInteger(value.generation) ||
-    (value.generation as number) > UINT32_MAX
+    value.generation > UINT32_MAX
   ) {
     throw new VectorStoreCorruptionError(
       "Vector manifest generation is invalid.",
     );
   }
   if (
+    typeof value.dimensions !== "number" ||
     !Number.isSafeInteger(value.dimensions) ||
-    (value.dimensions as number) <= 0 ||
-    (value.dimensions as number) > UINT32_MAX
+    value.dimensions <= 0 ||
+    value.dimensions > UINT32_MAX
   ) {
     throw new VectorStoreCorruptionError(
       "Vector manifest dimensions are invalid.",
@@ -401,7 +415,7 @@ function parseManifest(raw: string): VectorStoreManifest {
   }
   if (
     !isNonNegativeSafeInteger(value.count) ||
-    (value.count as number) > UINT32_MAX
+    value.count > UINT32_MAX
   ) {
     throw new VectorStoreCorruptionError("Vector manifest count is invalid.");
   }
@@ -440,11 +454,11 @@ function parseManifest(raw: string): VectorStoreManifest {
 
   return {
     schemaVersion: VECTOR_MANIFEST_SCHEMA_VERSION,
-    generation: value.generation as number,
-    dimensions: value.dimensions as number,
+    generation: value.generation,
+    dimensions: value.dimensions,
     embeddingSpaceId: value.embeddingSpaceId,
     normalized: true,
-    count: value.count as number,
+    count: value.count,
     binaryFile: VECTOR_BINARY_FILE,
     records,
   };
@@ -1021,11 +1035,9 @@ export class LocalVectorStore implements VectorStore {
         binary.count === 0 &&
         binary.vectors.length === 0
       );
-    } catch (
+    } catch {
       // An invalid or incompatible single file is not sufficient evidence of
       // a first-save boundary and falls through to controlled corruption.
-      _error
-    ) {
       return false;
     }
   }
@@ -1115,14 +1127,13 @@ export class LocalVectorStore implements VectorStore {
   ): readonly string[] {
     if (value === undefined) return [];
     if (
-      !Array.isArray(value) ||
-      !value.every((item) => typeof item === "string")
+      !isStringArray(value)
     ) {
       throw new VectorValidationError(
         `Mutation ${label} must be an array of strings.`,
       );
     }
-    return [...value] as string[];
+    return value.slice();
   }
 
   private stringSet(

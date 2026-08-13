@@ -1115,10 +1115,13 @@ export default class AIHubPlugin extends Plugin {
     const fm = cache?.frontmatter;
     const fmTags: unknown = fm?.tags ?? fm?.tag;
     if (fmTags) {
-      const extra = Array.isArray(fmTags)
+      const extra: unknown[] = Array.isArray(fmTags)
         ? fmTags
-        : String(fmTags).split(/[,\s]+/);
+        : typeof fmTags === "string" || typeof fmTags === "number"
+          ? String(fmTags).split(/[,\s]+/)
+          : [];
       extra.forEach((raw) => {
+        if (typeof raw !== "string" && typeof raw !== "number") return;
         const t = String(raw).trim();
         if (t) tags.push(t.startsWith("#") ? t : `#${t}`);
       });
@@ -1348,7 +1351,7 @@ export default class AIHubPlugin extends Plugin {
 
     const notice = notify("loading", tr("Генерирую MOC..."));
     let cancelled = false;
-    notice.noticeEl.addEventListener("click", () => {
+    notice.containerEl.addEventListener("click", () => {
       cancelled = true;
     });
 
@@ -1763,7 +1766,7 @@ function notify(
     loading: 0,
   };
   const n = new Notice(message, durationMs ?? defaultDur[type]);
-  n.noticeEl.addClass("ai-hub-notice", `ai-hub-notice-${type}`);
+  n.containerEl.addClass("ai-hub-notice", `ai-hub-notice-${type}`);
   return n;
 }
 

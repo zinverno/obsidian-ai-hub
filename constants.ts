@@ -1,4 +1,4 @@
-import { InsertionType } from "./settings";
+import type { InsertionType } from "./settings";
 
 // ─────────────────────────────────────────────────────────────────────
 //  ПРОВАЙДЕРЫ LLM
