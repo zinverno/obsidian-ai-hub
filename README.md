@@ -24,7 +24,7 @@ Vault Audit AI is an open-source Obsidian Community Plugin for searching notes b
 
 Instead of relying only on filenames and exact keywords, it adds a semantic layer to your vault. You can recover forgotten ideas, surface hidden connections, review possible duplicates, and keep a persistent vector index synchronized as your notes evolve.
 
-**Version:** 1.5.0 · **Requires Obsidian:** 1.8.7 or later · **License:** [MIT](LICENSE)
+**Version:** 1.7.0 · **Requires Obsidian:** 1.8.7 or later · **License:** [MIT](LICENSE)
 
 ## See it in action
 
