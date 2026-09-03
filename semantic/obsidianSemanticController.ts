@@ -1,5 +1,21 @@
 import { App, Notice, Plugin, TFile } from "obsidian";
 import type { TAbstractFile } from "obsidian";
+import { streamOpenRouter, validateSettings } from "../api";
+import { MAX_TOKENS_STREAM } from "../constants";
+import type { AIHubSettings } from "../settings";
+import {
+  RagGenerationError,
+  RagInsufficientContextError,
+  RagService,
+  RagSettingsError,
+  RagValidationError,
+} from "../rag";
+import { AskVaultModal } from "../rag/ragModal";
+import type {
+  RagAskCallbacks,
+  RagAskResult,
+  RagContext,
+} from "../rag/types";
 import { t as tr } from "../i18n";
 import {
   EMBEDDING_PROVIDER_PROFILES,
@@ -61,10 +77,7 @@ import { normalizeVectorStoreBasePath } from "../vectorStore";
 interface SemanticPluginHost {
   app: App;
   manifest: { id: string };
-  settings: {
-    semantic: EmbeddingSettings;
-    semanticAutoSyncSuspended?: boolean;
-  };
+  settings: AIHubSettings;
   addCommand(command: Parameters<Plugin["addCommand"]>[0]): unknown;
   registerEvent(eventRef: Parameters<Plugin["registerEvent"]>[0]): void;
   saveSettings(): Promise<void>;
@@ -87,6 +100,10 @@ export interface SemanticControllerDependencies {
     app: App,
     controller: ObsidianSemanticController,
   ) => void;
+  openAskVaultModal?: (
+    app: App,
+    controller: ObsidianSemanticController,
+  ) => void;
   openSimilarNotesModal?: (
     app: App,
     controller: ObsidianSemanticController,
@@ -100,6 +117,7 @@ export interface SemanticControllerDependencies {
   probeIndex?: typeof probeSemanticIndex;
   barrier?: AsyncReadWriteBarrier;
   storeRegistry?: SemanticStoreRegistry;
+  streamLanguageModel?: typeof streamOpenRouter;
   autoSyncDebounceMs?: number;
 }
 
@@ -134,6 +152,14 @@ function safeSettingsSnapshot(settings: EmbeddingSettings): EmbeddingSettings {
     embeddingBaseUrl: settings.embeddingBaseUrl,
     openRouterApiKey: settings.openRouterApiKey,
     openAICompatibleApiKey: settings.openAICompatibleApiKey,
+  };
+}
+
+function languageModelSettingsSnapshot(settings: AIHubSettings): AIHubSettings {
+  return {
+    ...settings,
+    deepAudit: { ...settings.deepAudit },
+    semantic: { ...settings.semantic },
   };
 }
 
@@ -210,6 +236,9 @@ export class ObsidianSemanticController {
   private readonly openSearchModal: NonNullable<
     SemanticControllerDependencies["openSearchModal"]
   >;
+  private readonly openAskVaultModal: NonNullable<
+    SemanticControllerDependencies["openAskVaultModal"]
+  >;
   private readonly openSimilarNotesModal: NonNullable<
     SemanticControllerDependencies["openSimilarNotesModal"]
   >;
@@ -224,6 +253,8 @@ export class ObsidianSemanticController {
   >;
   private readonly barrier: AsyncReadWriteBarrier;
   private readonly storeRegistry: SemanticStoreRegistry;
+  private readonly streamLanguageModel: typeof streamOpenRouter;
+  private readonly ragService: RagService;
   private readonly autoSync: SemanticAutoSync;
   private runtimeSlot: RuntimeSlot | null = null;
   private operationBusy = false;
@@ -253,6 +284,11 @@ export class ObsidianSemanticController {
       ((app, controller) => {
         new SemanticSearchModal(app, controller).open();
       });
+    this.openAskVaultModal =
+      dependencies.openAskVaultModal ??
+      ((app, controller) => {
+        new AskVaultModal(app, controller).open();
+      });
     this.openSimilarNotesModal =
       dependencies.openSimilarNotesModal ??
       ((app, controller, sourcePath) => {
@@ -263,6 +299,11 @@ export class ObsidianSemanticController {
       ((app, controller) => {
         new SemanticDuplicatesModal(app, controller).open();
       });
+    this.streamLanguageModel =
+      dependencies.streamLanguageModel ?? streamOpenRouter;
+    this.ragService = new RagService((question) =>
+      this.materializeRagContext(question),
+    );
     this.resetStorage = dependencies.resetStorage ?? resetSemanticStorage;
     this.probeIndex = dependencies.probeIndex ?? probeSemanticIndex;
     const automaticSyncSuspended =
@@ -295,6 +336,11 @@ export class ObsidianSemanticController {
       id: "ai-semantic-search",
       name: tr("Семантический поиск"),
       callback: () => this.openSearch(),
+    });
+    this.plugin.addCommand({
+      id: "ai-rag-ask-vault",
+      name: tr("Спросить Vault"),
+      callback: () => this.openAskVault(),
     });
     this.plugin.addCommand({
       id: "ai-semantic-find-similar-notes",
@@ -461,6 +507,35 @@ export class ObsidianSemanticController {
   openSearch(): void {
     if (!this.ensureEnabled()) return;
     this.openSearchModal(this.plugin.app, this);
+  }
+
+  openAskVault(): void {
+    if (!this.ensureEnabled()) return;
+    this.openAskVaultModal(this.plugin.app, this);
+  }
+
+  async askVault(
+    question: string,
+    callbacks: RagAskCallbacks,
+    signal: AbortSignal,
+  ): Promise<RagAskResult> {
+    const settings = languageModelSettingsSnapshot(this.plugin.settings);
+    if (validateSettings(settings)) throw new RagSettingsError();
+    return this.ragService.ask(question, {
+      ...callbacks,
+      signal,
+      generate: ({ system, user, onToken, signal: streamSignal }) =>
+        this.streamLanguageModel(
+          settings,
+          system,
+          user,
+          onToken,
+          {
+            maxTokens: MAX_TOKENS_STREAM,
+            signal: streamSignal,
+          },
+        ),
+    });
   }
 
   openSimilarNotes(): void {
@@ -804,6 +879,21 @@ export class ObsidianSemanticController {
   }
 
   errorMessage(error: unknown): string {
+    if (error instanceof RagInsufficientContextError) {
+      return tr("Не удалось найти достаточно индексированного контекста Vault для этого вопроса.");
+    }
+    if (error instanceof RagSettingsError) {
+      return tr("Проверьте настройки языковой модели для Ask your Vault.");
+    }
+    if (error instanceof RagValidationError) {
+      return tr("Введите непустой вопрос длиной не более 2000 символов.");
+    }
+    if (error instanceof Error && error.name === "TimeoutError") {
+      return tr("Время генерации ответа истекло. Повторите запрос.");
+    }
+    if (error instanceof RagGenerationError) {
+      return tr("Языковая модель не смогла сгенерировать ответ. Проверьте настройки и соединение.");
+    }
     if (
       error instanceof SemanticCompatibilityError ||
       error instanceof IndexingCompatibilityError
@@ -851,6 +941,15 @@ export class ObsidianSemanticController {
     } else if (newIsMarkdown) {
       this.autoSync.upsert(file.path);
     }
+  }
+
+  private materializeRagContext(question: string): Promise<RagContext> {
+    return this.barrier.withShared(async () => {
+      const runtime = await this.runtimeForDiscovery();
+      const context = await runtime.buildRagContext(question);
+      this.updateReadyStatus(runtime);
+      return context;
+    });
   }
 
   private async runtimeForDiscovery(): Promise<SemanticRuntime> {

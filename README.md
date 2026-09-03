@@ -41,6 +41,7 @@ Instead of relying only on filenames and exact keywords, it adds a semantic laye
 - 🔎 **Search by meaning** instead of remembering the exact wording.
 - 🧠 **Rediscover related notes** from the document you are already working on.
 - 🧹 **Review potential semantic duplicates** and overlapping ideas.
+- 💬 **Ask your Vault** and receive a streamed, source-backed answer from indexed notes.
 - 🗺️ **Audit your vault** for clusters, orphan notes, tags, folders, and structural issues.
 - ✍️ **Use AI inside Obsidian** for writing, transformations, flashcards, Dataview, and batch processing.
 - 🔒 **Choose local-first options** with Ollama, or connect remote AI providers when you want them.
@@ -78,6 +79,20 @@ Search starts with a query. Discovery starts with a note and asks what else in t
 - Empty and near-empty notes are excluded with a deterministic minimum-content rule to reduce false positives.
 
 > High semantic similarity is a review signal, not proof that two notes are identical or safe to merge.
+
+### Ask your Vault
+
+**Ask your Vault** is a one-shot retrieval-augmented question flow over the existing semantic index.
+
+- Reuses the configured embedding provider and the same persistent vector store; it does not create a second index.
+- Embeds the question once, retrieves diverse candidate chunks, and reconstructs their current full text from Markdown notes.
+- Rejects missing, stale, or hash-mismatched chunks instead of sending outdated indexed previews to the language model.
+- Applies deterministic per-document limits and a 12,000 Unicode code-point context budget.
+- Streams the answer and presents trusted source cards with exact paths and best-effort source-line navigation.
+- Treats retrieved note text as untrusted data and assigns citation IDs such as `[S1]` in plugin code.
+- Never builds or rebuilds an index implicitly and never edits source notes.
+
+> Ask your Vault requires a compatible, non-empty semantic index and valid language-model settings.
 
 ### AI writing tools
 
@@ -165,6 +180,7 @@ Do not copy the source TypeScript files into the plugin directory.
 5. Select **Test embeddings** to verify the connection.
 6. Run **Update the Vault semantic index** from the command palette.
 7. Open **Semantic search** from the command palette.
+8. Configure a language-model provider, then open **Ask your Vault** for a source-backed answer.
 
 After the active note is indexed, **Find similar notes** can compare it with the rest of the index. **Find potential semantic duplicates** scans the existing document representations without re-embedding the vault.
 
@@ -185,6 +201,8 @@ Vault Audit AI separates local storage from provider-side processing so you can 
 - The plugin does not upload stored vectors or their index metadata.
 - When OpenRouter or another remote embedding API is selected, note chunks are sent to that endpoint during indexing and synchronization.
 - Semantic search queries are sent to the selected embedding provider for query embedding.
+- **Ask your Vault** performs one query embedding for retrieval. When the embedding provider is remote, the question is sent to that provider; retrieved source chunks are not re-embedded during Ask.
+- When the configured language-model provider is remote, **Ask your Vault** sends it the question plus only the selected, reconstructed source chunks and required metadata. The whole vault, unused candidate notes, and vector index files are not sent to the language-model provider.
 - **Find similar notes** and potential duplicate detection operate on vectors already present in the local index and do not make an embedding-provider request for the comparison itself.
 - Ollama allows embedding generation to remain local when connected to a local Ollama instance.
 - Automatic semantic synchronization never edits Markdown files. It reads the latest Markdown content and changes only the local vector index.
@@ -219,6 +237,7 @@ The semantic index is designed to avoid unnecessary reprocessing.
 | Command | Purpose |
 | --- | --- |
 | **Semantic search** | Search the local vector index and open a grouped note result. |
+| **Ask your Vault** | Retrieve current indexed source chunks and stream a cited answer from the configured language model. |
 | **Find similar notes** | Compare the active indexed Markdown note with other indexed notes using existing local vectors. |
 | **Find potential semantic duplicates** | Review conservative, highly similar note pairs; similarity is not proof of identity. |
 | **Update the Vault semantic index** | Reconcile all eligible Markdown notes with the persistent semantic index. |
@@ -248,8 +267,12 @@ Embedding provider
 Local persistent vector store
     ↓
 Chunk search + document representations
-    ↓
-Semantic Search / Similar Notes / Duplicate Candidates
+    ├─ Semantic Search / Similar Notes / Duplicate Candidates
+    └─ Ask your Vault context reconstruction + budget
+           ↓
+       Configured language model
+           ↓
+       Streamed answer + trusted source cards
 ```
 
 Stable chunk hashes drive incremental deltas so unchanged chunks are reused.
@@ -263,6 +286,7 @@ Clear and rebuild are explicit operations and do not modify source notes.
 ## Current limitations
 
 - The initial semantic index, Clear, and Rebuild remain explicit user operations.
+- Ask your Vault is a one-shot question flow; it does not keep a multi-turn conversation history.
 - Automatic synchronization covers Markdown notes only; attachments, Canvas files, images, and other file types are ignored.
 - The vector store does not use an ANN or HNSW index.
 - Similarity search performs a local linear scan and is intended for small and medium personal vaults.

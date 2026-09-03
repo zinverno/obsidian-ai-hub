@@ -1,4 +1,5 @@
 import type { ChunkSourceRange } from "../chunking/types";
+import type { RagContext } from "../rag/types";
 import type {
   IndexDocumentInput,
   IndexingExecutionOptions,
@@ -17,6 +18,7 @@ export interface SemanticChunkMatch {
   path: string;
   headingPath: string[];
   ordinal: number;
+  contentHash: string;
   preview?: string;
   source: ChunkSourceRange;
   score: number;
@@ -79,6 +81,7 @@ export interface SemanticRuntime {
     query: string,
     options?: SemanticSearchOptions,
   ) => Promise<SemanticDocumentResult[]>;
+  buildRagContext: (question: string) => Promise<RagContext>;
   /**
    * Rejects with SemanticSourceNotIndexedError when a non-empty compatible
    * index does not contain the requested source; UI boundaries render that

@@ -17,6 +17,7 @@ import {
   VectorStorePersistenceError,
 } from "../vectorStore";
 import type { VectorStore } from "../vectorStore";
+import { RagContextBuilder } from "../rag/ragContextBuilder";
 import {
   SemanticCompatibilityError,
   SemanticNotReadyError,
@@ -42,6 +43,7 @@ export function createObsidianSemanticRuntime(
 ): SemanticRuntime {
   const settings: EmbeddingSettings = { ...options.settings };
   return new LazySemanticRuntime(async () => {
+    const chunker = new MarkdownChunker();
     const descriptor = options.existingDescriptor;
     let actualProvider: EmbeddingProvider | null = null;
     const provider: EmbeddingProvider = descriptor
@@ -60,7 +62,7 @@ export function createObsidianSemanticRuntime(
     );
     let vectorStore: VectorStore | null = null;
     const indexingService = new IndexingService({
-      chunker: new MarkdownChunker(),
+      chunker,
       embeddingProvider: provider,
       embeddingSpace: {
         providerId: provider.id,
@@ -131,12 +133,14 @@ export function createObsidianSemanticRuntime(
       store,
       stats.dimensions,
     );
+    const source = new ObsidianMarkdownDocumentSource(options.app);
     return {
       indexingService,
       searchService,
       discoveryService: new SemanticDiscoveryService(store, stats.dimensions),
       vectorStore: store,
-      source: new ObsidianMarkdownDocumentSource(options.app),
+      source,
+      ragContextBuilder: new RagContextBuilder(searchService, source, chunker),
     };
   });
 }
