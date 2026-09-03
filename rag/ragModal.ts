@@ -79,9 +79,11 @@ export class AskVaultModal extends Modal {
     this.openState = true;
     this.titleEl.setText(tr("Спросить Vault"));
     this.contentEl.empty();
+    this.modalEl.addClass("ai-rag-shell");
     this.contentEl.addClass("ai-semantic-search-modal", "ai-rag-modal");
 
-    this.questionEl = this.contentEl.createEl("textarea", {
+    const compose = this.contentEl.createDiv({ cls: "ai-rag-compose" });
+    this.questionEl = compose.createEl("textarea", {
       cls: "ai-rag-question",
       attr: {
         placeholder: tr("Задайте вопрос по содержимому Vault"),
@@ -89,7 +91,7 @@ export class AskVaultModal extends Modal {
         rows: "4",
       },
     });
-    const actions = this.contentEl.createDiv({ cls: "ai-rag-actions" });
+    const actions = compose.createDiv({ cls: "ai-rag-actions" });
     this.cancelButton = actions.createEl("button", {
       text: tr("Отменить генерацию"),
       attr: { type: "button" },
@@ -100,9 +102,11 @@ export class AskVaultModal extends Modal {
       cls: "mod-cta",
       attr: { type: "button" },
     });
-    this.statusEl = this.contentEl.createDiv({ cls: "ai-rag-status" });
-    this.answerEl = this.contentEl.createDiv({ cls: "ai-rag-answer" });
-    this.sourcesEl = this.contentEl.createDiv({ cls: "ai-rag-sources" });
+    this.statusEl = compose.createDiv({ cls: "ai-rag-status" });
+
+    const results = this.contentEl.createDiv({ cls: "ai-rag-results" });
+    this.answerEl = results.createDiv({ cls: "ai-rag-answer" });
+    this.sourcesEl = results.createDiv({ cls: "ai-rag-sources" });
 
     this.questionEl.addEventListener("keydown", (event) => {
       if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {

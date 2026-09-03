@@ -132,6 +132,7 @@ const mocks = vi.hoisted(() => {
   class Modal {
     app: unknown;
     titleEl = new FakeElement();
+    modalEl = new FakeElement();
     contentEl = new FakeElement();
     constructor(app: unknown) {
       this.app = app;
@@ -240,7 +241,39 @@ function harness() {
   return { app, content, delegate, leaf, modal, view };
 }
 
+function cssRule(styles: string, selector: string): string {
+  const marker = `${selector} {`;
+  const start = styles.indexOf(marker);
+  if (start < 0) {
+    throw new Error(`Missing CSS rule: ${selector}`);
+  }
+  const end = styles.indexOf("}", start);
+  if (end < 0) {
+    throw new Error(`Unterminated CSS rule: ${selector}`);
+  }
+  return styles.slice(start, end + 1);
+}
+
 describe("AskVaultModal", () => {
+  it("uses a bounded column hierarchy for compose and result states", () => {
+    const { content, modal } = harness();
+    const shell = modal.modalEl as unknown as InstanceType<
+      typeof mocks.FakeElement
+    >;
+    const compose = content.findByClass("ai-rag-compose")[0];
+    const results = content.findByClass("ai-rag-results")[0];
+
+    expect(shell.findByClass("ai-rag-shell")).toHaveLength(1);
+    expect(content.children).toEqual([compose, results]);
+    expect(compose.findByClass("ai-rag-question")).toHaveLength(1);
+    expect(compose.findByClass("ai-rag-actions")).toHaveLength(1);
+    expect(compose.findByClass("ai-rag-status")).toHaveLength(1);
+    expect(results.children.map((child) => child.cls)).toEqual([
+      "ai-rag-answer",
+      "ai-rag-sources",
+    ]);
+  });
+
   it("focuses the question and rejects an empty ask locally", async () => {
     const { content, delegate } = harness();
     const textarea = content.findByTag("textarea")[0];
@@ -272,6 +305,49 @@ describe("AskVaultModal", () => {
     expect(content.findByClass("ai-rag-source-heading")[0].text).toBe(
       "Alpha › Relevant",
     );
+  });
+
+  it("renders many long trusted sources as sibling cards", async () => {
+    const { content, delegate } = harness();
+    const longPath = `Folder/${"unbroken-segment-".repeat(30)}/Note.md`;
+    const sourceTemplate = context().sources[0];
+    const manyContext: RagContext = {
+      usedCodePoints: 10_000,
+      sources: Array.from({ length: 30 }, (_, index) => ({
+        ...sourceTemplate,
+        id: `S${index + 1}`,
+        path: `${longPath}-${index + 1}`,
+        chunkId: `chunk-${index + 1}`,
+        text: "x".repeat(500),
+      })),
+    };
+    delegate.askVault.mockImplementation(async (
+      _question,
+      callbacks,
+    ) => {
+      callbacks.onContext?.(manyContext);
+      callbacks.onToken?.("answer ".repeat(300));
+      return {
+        answer: "answer ".repeat(300),
+        context: manyContext,
+        citedSourceIds: manyContext.sources.map((source) => source.id),
+        unknownCitationIds: [],
+      };
+    });
+
+    const textarea = content.findByTag("textarea")[0];
+    textarea.value = "question";
+    content.findByClass("mod-cta")[0].trigger("click");
+    await flush();
+
+    const cards = content.findByClass("ai-rag-source");
+    expect(cards).toHaveLength(30);
+    expect(cards.every((card) => card.tag === "button")).toBe(true);
+    expect(content.findByClass("ai-rag-source-title")[0].text).toBe(
+      `[S1] ${longPath}-1`,
+    );
+    expect(Array.from(content.findByClass("ai-rag-source-snippet")[0].text))
+      .toHaveLength(241);
   });
 
   it("does not create a fake source link from an unknown model citation", async () => {
@@ -482,5 +558,42 @@ describe("AskVaultModal", () => {
     );
     expect(source).not.toContain("innerHTML");
     expect(source).not.toContain("insertAdjacentHTML");
+  });
+
+  it("keeps the modal, result panes, and source cards overflow-safe", () => {
+    const styles = readFileSync(
+      new URL("../styles.css", import.meta.url),
+      "utf8",
+    );
+    const shell = cssRule(styles, ".modal.ai-rag-shell");
+    const modal = cssRule(styles, ".ai-rag-modal");
+    const results = cssRule(styles, ".ai-rag-results");
+    const sources = cssRule(styles, ".ai-rag-sources");
+    const card = cssRule(styles, ".ai-rag-source");
+    const title = cssRule(styles, ".ai-rag-source-title");
+
+    expect(shell).toMatch(/height:\s*min\(/);
+    expect(shell).toMatch(/overflow:\s*hidden/);
+    expect(modal).toMatch(/display:\s*flex/);
+    expect(modal).toMatch(/flex-direction:\s*column/);
+    expect(modal).toMatch(/min-height:\s*0/);
+    expect(results).toMatch(/min-width:\s*0/);
+    expect(results).toMatch(/min-height:\s*0/);
+    expect(results).toMatch(/overflow:\s*hidden/);
+    expect(sources).toMatch(/flex-direction:\s*column/);
+    expect(sources).toMatch(/flex:\s*1 1 0/);
+    expect(sources).toMatch(/min-width:\s*0/);
+    expect(sources).toMatch(/min-height:\s*0/);
+    expect(sources).toMatch(/overflow-x:\s*hidden/);
+    expect(sources).toMatch(/overflow-y:\s*auto/);
+    expect(card).toMatch(/display:\s*block/);
+    expect(card).toMatch(/flex:\s*0 0 auto/);
+    expect(card).toMatch(/min-width:\s*0/);
+    expect(card).toMatch(/height:\s*auto/);
+    expect(card).toMatch(/white-space:\s*normal/);
+    expect(title).toMatch(/overflow-wrap:\s*anywhere/);
+    expect(title).toMatch(/word-break:\s*break-word/);
+    const answer = cssRule(styles, ".ai-rag-answer");
+    expect(answer).toMatch(/flex:\s*0 0 auto/);
   });
 });
