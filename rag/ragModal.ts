@@ -154,6 +154,7 @@ export class AskVaultModal extends Modal {
     const callbacks: RagAskCallbacks = {
       onContext: (context) => {
         if (!this.isCurrent(request)) return;
+        this.setGenerationActive(true);
         this.setStatus(
           `${tr("Найдено релевантных источников: {n}.", {
             n: context.sources.length,
@@ -242,7 +243,13 @@ export class AskVaultModal extends Modal {
   private setBusy(value: boolean): void {
     if (this.questionEl) this.questionEl.disabled = value;
     if (this.askButton) this.askButton.disabled = value;
-    if (this.cancelButton) this.cancelButton.disabled = !value;
+    this.setGenerationActive(false);
+  }
+
+  private setGenerationActive(value: boolean): void {
+    if (this.cancelButton) {
+      this.cancelButton.disabled = !value;
+    }
   }
 
   private setStatus(

@@ -101,34 +101,11 @@ function isCanonicalMarkdownPath(value: unknown): value is string {
     .some((segment) => !segment || segment === "." || segment === "..");
 }
 
-function sourceRangeIsValid(
-  match: SemanticChunkMatch,
-  content: string,
-): boolean {
-  const source = match.source;
-  if (!source || typeof source !== "object") return false;
-  const values = [
-    source.startOffset,
-    source.endOffset,
-    source.startLine,
-    source.endLine,
-  ];
-  if (
-    values.some((value) => !Number.isSafeInteger(value) || value < 0) ||
-    source.startOffset > source.endOffset ||
-    source.endOffset > content.length ||
-    source.startLine > source.endLine
-  ) {
-    return false;
-  }
-  const lineCount = content.length ? content.split("\n").length : 0;
-  return lineCount > 0 && source.endLine < lineCount;
-}
-
 function chunkIsValid(
   chunk: NoteChunk,
   path: string,
-  content: string,
+  contentLength: number,
+  lineCount: number,
 ): boolean {
   return (
     chunk &&
@@ -150,10 +127,10 @@ function chunkIsValid(
     Number.isSafeInteger(chunk.source.endLine) &&
     chunk.source.startOffset >= 0 &&
     chunk.source.endOffset >= chunk.source.startOffset &&
-    chunk.source.endOffset <= content.length &&
+    chunk.source.endOffset <= contentLength &&
     chunk.source.startLine >= 0 &&
     chunk.source.endLine >= chunk.source.startLine &&
-    chunk.source.endLine < content.split("\n").length
+    chunk.source.endLine < lineCount
   );
 }
 
@@ -264,10 +241,16 @@ export class RagContextBuilder {
       } catch {
         continue;
       }
+      const lineCount = sourceDocument.content.split("\n").length;
       const chunksById = new Map<string, NoteChunk>();
       for (const chunk of chunks) {
         if (
-          chunkIsValid(chunk, document.path, sourceDocument.content) &&
+          chunkIsValid(
+            chunk,
+            document.path,
+            sourceDocument.content.length,
+            lineCount,
+          ) &&
           !chunksById.has(chunk.id)
         ) {
           chunksById.set(chunk.id, chunk);
@@ -276,7 +259,6 @@ export class RagContextBuilder {
 
       const documentCandidates: ReconstructedCandidate[] = [];
       for (const match of matches) {
-        if (!sourceRangeIsValid(match, sourceDocument.content)) continue;
         const chunk = chunksById.get(match.id);
         if (!chunk || chunk.contentHash !== match.contentHash) continue;
         if (seenContent.has(chunk.text)) continue;

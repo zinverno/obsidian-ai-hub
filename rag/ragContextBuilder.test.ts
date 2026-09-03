@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { MarkdownChunker } from "../chunking/markdownChunker";
 import type {
   ChunkingStrategy,
   MarkdownChunkInput,
@@ -328,14 +329,72 @@ describe("RagContextBuilder", () => {
     expect((await builder.build("q")).sources).toEqual([]);
   });
 
-  it("drops invalid indexed source ranges", async () => {
+  it("ignores stale indexed ranges and uses the reconstructed current range", async () => {
     const value = chunk("A.md", "a", "safe");
-    const bad = match(value, 1, {
+    const stale = match(value, 1, {
       source: { startOffset: 0, endOffset: 999, startLine: 0, endLine: 0 },
     });
-    const { builder } = harness([document("A.md", 1, [bad])], [value]);
+    const { builder } = harness([document("A.md", 1, [stale])], [value]);
 
-    expect((await builder.build("q")).sources).toEqual([]);
+    const context = await builder.build("q");
+
+    expect(context.sources).toHaveLength(1);
+    expect(context.sources[0].source).toEqual(value.source);
+  });
+
+  it("accepts a real Markdown chunk whose source range shifted", async () => {
+    const path = "Shifted.md";
+    const unchangedText = "The invariant text stays exactly the same.";
+    const targetMarkdown = `## Target\n${unchangedText}\n`;
+    const prefix = Array.from(
+      { length: 120 },
+      (_, index) => `unrelated prefix line ${index}`,
+    ).join("\n");
+    const oldContent = `${prefix}\n\n${targetMarkdown}`;
+    const currentContent = targetMarkdown;
+    const chunker = new MarkdownChunker();
+    const findTarget = (chunks: NoteChunk[]) =>
+      chunks.find(
+        (candidate) =>
+          candidate.headingPath[candidate.headingPath.length - 1] ===
+            "Target" &&
+          candidate.text.includes(unchangedText),
+      );
+    const oldTarget = findTarget(chunker.chunk({
+      path,
+      content: oldContent,
+    }));
+    const currentTarget = findTarget(chunker.chunk({
+      path,
+      content: currentContent,
+    }));
+    if (!oldTarget || !currentTarget) {
+      throw new Error("Expected the real MarkdownChunker target chunk.");
+    }
+
+    expect(currentTarget.id).toBe(oldTarget.id);
+    expect(currentTarget.contentHash).toBe(oldTarget.contentHash);
+    expect(currentTarget.source).not.toEqual(oldTarget.source);
+    expect(oldTarget.source.endOffset).toBeGreaterThan(currentContent.length);
+
+    const search = {
+      search: vi.fn(async () => [
+        document(path, 1, [match(oldTarget, 1)]),
+      ]),
+    };
+    const source = new FakeSource(new Map([
+      [path, { path, content: currentContent }],
+    ]));
+    const builder = new RagContextBuilder(search, source, chunker);
+    const context = await builder.build("q");
+
+    expect(context.sources).toHaveLength(1);
+    expect(context.sources[0]).toMatchObject({
+      chunkId: currentTarget.id,
+      contentHash: currentTarget.contentHash,
+      text: currentTarget.text,
+      source: currentTarget.source,
+    });
   });
 
   it("drops invalid reconstructed source ranges", async () => {

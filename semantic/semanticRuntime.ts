@@ -1,5 +1,4 @@
-import { MarkdownChunker } from "../chunking";
-import { RagContextBuilder } from "../rag/ragContextBuilder";
+import type { RagContextBuilder } from "../rag/ragContextBuilder";
 import type { RagContext } from "../rag/types";
 import type {
   IndexDocumentInput,
@@ -34,7 +33,7 @@ export interface SemanticRuntimeComponents {
   discoveryService?: SemanticDiscoveryService;
   vectorStore: VectorStore;
   source: MarkdownDocumentSource;
-  ragContextBuilder?: RagContextBuilder;
+  ragContextBuilder: RagContextBuilder;
 }
 
 export type SemanticRuntimeInitializer =
@@ -188,7 +187,8 @@ export class LazySemanticRuntime implements SemanticRuntime {
         !components?.indexingService ||
         !components.searchService ||
         !components.vectorStore ||
-        !components.source
+        !components.source ||
+        !components.ragContextBuilder
       ) {
         throw new SemanticNotReadyError(
           "Semantic runtime initializer returned invalid components.",
@@ -201,13 +201,7 @@ export class LazySemanticRuntime implements SemanticRuntime {
           components.vectorStore,
           stats.dimensions,
         );
-      this.ragContextBuilder =
-        components.ragContextBuilder ??
-        new RagContextBuilder(
-          components.searchService,
-          components.source,
-          new MarkdownChunker(),
-        );
+      this.ragContextBuilder = components.ragContextBuilder;
       this.components = components;
     } catch (error) {
       this.components = null;

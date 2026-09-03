@@ -201,7 +201,8 @@ Vault Audit AI separates local storage from provider-side processing so you can 
 - The plugin does not upload stored vectors or their index metadata.
 - When OpenRouter or another remote embedding API is selected, note chunks are sent to that endpoint during indexing and synchronization.
 - Semantic search queries are sent to the selected embedding provider for query embedding.
-- **Ask your Vault** sends the question plus only its selected, reconstructed source chunks and metadata to the configured language-model provider; it does not send the whole vault or vector index.
+- **Ask your Vault** performs one query embedding for retrieval. When the embedding provider is remote, the question is sent to that provider; retrieved source chunks are not re-embedded during Ask.
+- When the configured language-model provider is remote, **Ask your Vault** sends it the question plus only the selected, reconstructed source chunks and required metadata. The whole vault, unused candidate notes, and vector index files are not sent to the language-model provider.
 - **Find similar notes** and potential duplicate detection operate on vectors already present in the local index and do not make an embedding-provider request for the comparison itself.
 - Ollama allows embedding generation to remain local when connected to a local Ollama instance.
 - Automatic semantic synchronization never edits Markdown files. It reads the latest Markdown content and changes only the local vector index.

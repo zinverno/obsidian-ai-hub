@@ -316,19 +316,48 @@ describe("AskVaultModal", () => {
     await flush();
   });
 
+  it("enables cancel only after retrieval materializes the context", async () => {
+    let callbacks: RagAskCallbacks | undefined;
+    let release = () => {};
+    const { content, delegate } = harness();
+    delegate.askVault.mockImplementation(
+      (_question, nextCallbacks) =>
+        new Promise((resolve) => {
+          callbacks = nextCallbacks;
+          release = () => resolve(result());
+        }),
+    );
+    const textarea = content.findByTag("textarea")[0];
+    const cancel = content.findByTag("button").find(
+      (button) => button.text === "Отменить генерацию",
+    );
+    textarea.value = "question";
+    content.findByClass("mod-cta")[0].trigger("click");
+
+    expect(cancel?.disabled).toBe(true);
+    callbacks?.onContext?.(context());
+    expect(cancel?.disabled).toBe(false);
+
+    release();
+    await flush();
+    expect(cancel?.disabled).toBe(true);
+  });
+
   it("cancels active generation with the same AbortSignal", async () => {
     let observed: AbortSignal | undefined;
     const { content, delegate } = harness();
     delegate.askVault.mockImplementation(
-      (_question, _callbacks, signal) =>
-        new Promise((_resolve, reject) => {
+      (_question, callbacks, signal) => {
+        callbacks.onContext?.(context());
+        return new Promise((_resolve, reject) => {
           observed = signal;
           signal.addEventListener("abort", () => {
             const error = new Error("cancelled");
             error.name = "AbortError";
             reject(error);
           });
-        }),
+        });
+      },
     );
     const textarea = content.findByTag("textarea")[0];
     textarea.value = "question";
@@ -336,6 +365,7 @@ describe("AskVaultModal", () => {
     const cancel = content.findByTag("button").find(
       (button) => button.text === "Отменить генерацию",
     );
+    expect(cancel?.disabled).toBe(false);
     cancel?.trigger("click");
     await flush();
 
@@ -345,25 +375,75 @@ describe("AskVaultModal", () => {
     );
   });
 
-  it("aborts on close and ignores every late callback", async () => {
+  it("closes during retrieval without starting generation or updating UI", async () => {
+    let callbacks: RagAskCallbacks | undefined;
+    let signal: AbortSignal | undefined;
+    let finishRetrieval = () => {};
+    const generation = vi.fn();
+    const { content, delegate, modal } = harness();
+    delegate.askVault.mockImplementation(
+      async (_question, nextCallbacks, nextSignal) => {
+        callbacks = nextCallbacks;
+        signal = nextSignal;
+        await new Promise<void>((resolve) => {
+          finishRetrieval = resolve;
+        });
+        if (nextSignal.aborted) {
+          const error = new Error("cancelled during retrieval");
+          error.name = "AbortError";
+          throw error;
+        }
+        nextCallbacks.onContext?.(context());
+        generation();
+        nextCallbacks.onToken?.("generated");
+        return result();
+      },
+    );
+    const textarea = content.findByTag("textarea")[0];
+    textarea.value = "question";
+    content.findByClass("mod-cta")[0].trigger("click");
+    const cancel = content.findByTag("button").find(
+      (button) => button.text === "Отменить генерацию",
+    );
+
+    expect(cancel?.disabled).toBe(true);
+    modal.close();
+    callbacks?.onToken?.("late secret");
+    callbacks?.onContext?.(context());
+    finishRetrieval();
+    await flush();
+
+    expect(signal?.aborted).toBe(true);
+    expect(generation).not.toHaveBeenCalled();
+    expect(content.children).toEqual([]);
+    expect(content.text).not.toContain("late secret");
+  });
+
+  it("aborts on close during generation and ignores late streamed tokens", async () => {
     let callbacks: RagAskCallbacks | undefined;
     let signal: AbortSignal | undefined;
     let release = () => {};
     const { content, delegate, modal } = harness();
     delegate.askVault.mockImplementation(
-      (_question, nextCallbacks, nextSignal) =>
-        new Promise((resolve) => {
-          callbacks = nextCallbacks;
-          signal = nextSignal;
+      (_question, nextCallbacks, nextSignal) => {
+        callbacks = nextCallbacks;
+        signal = nextSignal;
+        nextCallbacks.onContext?.(context());
+        return new Promise((resolve) => {
           release = () => resolve(result());
-        }),
+        });
+      },
     );
     const textarea = content.findByTag("textarea")[0];
     textarea.value = "question";
     content.findByClass("mod-cta")[0].trigger("click");
+    const cancel = content.findByTag("button").find(
+      (button) => button.text === "Отменить генерацию",
+    );
+
+    expect(cancel?.disabled).toBe(false);
     modal.close();
     callbacks?.onToken?.("late secret");
-    callbacks?.onContext?.(context());
     release();
     await flush();
 

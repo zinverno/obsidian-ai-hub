@@ -132,6 +132,29 @@ describe("RagService", () => {
     expect(events).toEqual(["context", "on-context", "generate"]);
   });
 
+  it("does not start generation when aborted during retrieval", async () => {
+    const controller = new AbortController();
+    let resolveContext = (_context: RagContext) => {};
+    const pendingContext = new Promise<RagContext>((resolve) => {
+      resolveContext = resolve;
+    });
+    const load = vi.fn(() => pendingContext);
+    const generate = generator();
+    const service = new RagService(load);
+
+    const pending = service.ask("question", {
+      signal: controller.signal,
+      generate,
+    });
+    expect(load).toHaveBeenCalledOnce();
+
+    controller.abort();
+    resolveContext(context());
+
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    expect(generate).not.toHaveBeenCalled();
+  });
+
   it("forwards the external AbortSignal to generation", async () => {
     const controller = new AbortController();
     let observed: AbortSignal | undefined;
