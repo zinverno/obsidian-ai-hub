@@ -162,6 +162,7 @@ function copyMatch(result: VectorSearchResult): SemanticChunkMatch {
     path: result.path,
     headingPath: [...result.headingPath],
     ordinal: result.ordinal,
+    contentHash: result.contentHash,
     source: { ...result.source },
     score: result.score,
   };

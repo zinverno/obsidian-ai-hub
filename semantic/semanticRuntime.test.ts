@@ -9,6 +9,7 @@ import type {
   NoteChunk,
 } from "../chunking";
 import type { EmbeddingProvider } from "../embeddings/types";
+import { RagContextBuilder } from "../rag/ragContextBuilder";
 import {
   IndexingProviderError,
   IndexingService,
@@ -163,8 +164,9 @@ function createIntegrationHarness() {
 
   const runtime = new LazySemanticRuntime(async () => {
     initializerCalls++;
+    const chunker = new OneChunkStrategy();
     const indexingService = new IndexingService({
-      chunker: new OneChunkStrategy(),
+      chunker,
       embeddingProvider: provider,
       embeddingSpace: {
         providerId: provider.id,
@@ -186,15 +188,21 @@ function createIntegrationHarness() {
     const stats = indexingService.getStats();
     const vectorStore = createdStore;
     if (!vectorStore) throw new Error("store missing");
+    const searchService = new SemanticSearchService(
+      provider,
+      vectorStore,
+      stats.dimensions,
+    );
     return {
       indexingService,
       vectorStore,
-      searchService: new SemanticSearchService(
-        provider,
-        vectorStore,
-        stats.dimensions,
-      ),
+      searchService,
       source,
+      ragContextBuilder: new RagContextBuilder(
+        searchService,
+        source,
+        chunker,
+      ),
     };
   });
 
@@ -243,6 +251,25 @@ describe("LazySemanticRuntime", () => {
       ["alpha text"],
       ["alpha"],
     ]);
+  });
+
+  it("embeds only the question once and reconstructs RAG text from the source", async () => {
+    const harness = createIntegrationHarness();
+    await harness.runtime.indexVault();
+    harness.provider.embedCalls.length = 0;
+
+    const context = await harness.runtime.buildRagContext("alpha question");
+
+    expect(harness.provider.embedCalls).toEqual([["alpha question"]]);
+    expect(harness.source.calls).toBe(2);
+    expect(context.sources).toHaveLength(1);
+    expect(context.sources[0]).toMatchObject({
+      id: "S1",
+      path: "Alpha.md",
+      chunkId: "Alpha.md:0",
+      contentHash: "hash:alpha text",
+      text: "alpha text",
+    });
   });
 
   it("uses existing vectors for Similar Notes and duplicates without provider calls", async () => {

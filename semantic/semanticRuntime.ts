@@ -1,3 +1,6 @@
+import { MarkdownChunker } from "../chunking";
+import { RagContextBuilder } from "../rag/ragContextBuilder";
+import type { RagContext } from "../rag/types";
 import type {
   IndexDocumentInput,
   IndexingExecutionOptions,
@@ -31,6 +34,7 @@ export interface SemanticRuntimeComponents {
   discoveryService?: SemanticDiscoveryService;
   vectorStore: VectorStore;
   source: MarkdownDocumentSource;
+  ragContextBuilder?: RagContextBuilder;
 }
 
 export type SemanticRuntimeInitializer =
@@ -42,6 +46,7 @@ export class LazySemanticRuntime implements SemanticRuntime {
   private initializePromise: Promise<void> | null = null;
   private indexing = false;
   private discoveryService: SemanticDiscoveryService | null = null;
+  private ragContextBuilder: RagContextBuilder | null = null;
 
   constructor(initializer: SemanticRuntimeInitializer) {
     if (typeof initializer !== "function") {
@@ -127,6 +132,12 @@ export class LazySemanticRuntime implements SemanticRuntime {
     return this.requireComponents().searchService.search(query, options);
   }
 
+  async buildRagContext(question: string): Promise<RagContext> {
+    await this.initialize();
+    if (!this.ragContextBuilder) throw new SemanticNotReadyError();
+    return this.ragContextBuilder.build(question);
+  }
+
   async findSimilarNotes(
     sourcePath: string,
     options?: SemanticSimilarNotesOptions,
@@ -190,10 +201,18 @@ export class LazySemanticRuntime implements SemanticRuntime {
           components.vectorStore,
           stats.dimensions,
         );
+      this.ragContextBuilder =
+        components.ragContextBuilder ??
+        new RagContextBuilder(
+          components.searchService,
+          components.source,
+          new MarkdownChunker(),
+        );
       this.components = components;
     } catch (error) {
       this.components = null;
       this.discoveryService = null;
+      this.ragContextBuilder = null;
       if (error instanceof IndexingCompatibilityError) {
         throw new SemanticCompatibilityError(error);
       }

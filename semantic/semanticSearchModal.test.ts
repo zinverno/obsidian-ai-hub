@@ -189,6 +189,7 @@ function result(preview?: string): SemanticDocumentResult {
         path: "Folder/Alpha.md",
         headingPath: ["Alpha", "Section"],
         ordinal: 0,
+        contentHash: "hash-alpha",
         preview,
         source: {
           startOffset: 0,
@@ -393,6 +394,7 @@ function discoveryMatch(path: string, line: number) {
     path,
     headingPath: [path.replace(/\.md$/u, ""), "Relevant"],
     ordinal: 0,
+    contentHash: `hash-${path}`,
     preview: `safe preview for ${path}`,
     source: {
       startOffset: 0,

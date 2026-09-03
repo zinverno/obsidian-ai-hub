@@ -119,6 +119,10 @@ function fakeRuntime(overrides: Partial<SemanticRuntime> = {}): SemanticRuntime 
     findSimilarNotes: vi.fn(async () => []),
     findPotentialDuplicates: vi.fn(async () => []),
     search: vi.fn(async () => []),
+    buildRagContext: vi.fn(async () => ({
+      sources: [],
+      usedCodePoints: 0,
+    })),
     clear: vi.fn(async () => {
       initialized = true;
       count = 0;
@@ -251,6 +255,7 @@ describe("ObsidianSemanticController commands and lazy behavior", () => {
     harness.controller.registerCommands();
     expect(harness.commands.map((command) => command.id)).toEqual([
       "ai-semantic-search",
+      "ai-rag-ask-vault",
       "ai-semantic-find-similar-notes",
       "ai-semantic-find-potential-duplicates",
       "ai-semantic-index-vault",

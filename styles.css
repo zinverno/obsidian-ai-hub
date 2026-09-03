@@ -1316,3 +1316,99 @@
         grid-template-columns: minmax(0, 1fr);
     }
 }
+
+.ai-rag-modal {
+    width: min(760px, calc(100vw - 32px));
+}
+
+.ai-rag-question {
+    width: 100%;
+    min-height: 96px;
+    resize: vertical;
+}
+
+.ai-rag-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--ai-space-sm, 8px);
+    margin-top: var(--ai-space-sm, 8px);
+}
+
+.ai-rag-status {
+    min-height: 1.5em;
+    margin-top: var(--ai-space-md, 12px);
+    color: var(--text-muted);
+    white-space: pre-line;
+}
+
+.ai-rag-status[data-state="error"] {
+    color: var(--text-error);
+}
+
+.ai-rag-answer {
+    max-height: min(42vh, 420px);
+    margin-top: var(--ai-space-sm, 8px);
+    overflow: auto;
+    overflow-wrap: anywhere;
+    color: var(--text-normal);
+    line-height: 1.55;
+    white-space: pre-wrap;
+}
+
+.ai-rag-sources {
+    display: grid;
+    gap: var(--ai-space-sm, 8px);
+    margin-top: var(--ai-space-md, 12px);
+}
+
+.ai-rag-sources h3 {
+    margin: var(--ai-space-sm, 8px) 0 0;
+}
+
+.ai-rag-source {
+    width: 100%;
+    padding: var(--ai-space-md, 12px);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--ai-radius-md, 8px);
+    background: var(--background-secondary);
+    color: var(--text-normal);
+    cursor: pointer;
+    text-align: start;
+}
+
+.ai-rag-source:hover,
+.ai-rag-source:focus-visible {
+    border-color: var(--interactive-accent);
+    background: var(--background-modifier-hover);
+}
+
+.ai-rag-source-title {
+    overflow-wrap: anywhere;
+    font-weight: 600;
+}
+
+.ai-rag-source-heading,
+.ai-rag-source-range {
+    margin-top: 2px;
+    overflow-wrap: anywhere;
+    color: var(--text-muted);
+    font-size: var(--font-ui-smaller);
+}
+
+.ai-rag-source-snippet {
+    margin-top: var(--ai-space-sm, 8px);
+    overflow-wrap: anywhere;
+    color: var(--text-muted);
+    line-height: 1.45;
+    white-space: pre-wrap;
+}
+
+@media (max-width: 520px) {
+    .ai-rag-actions {
+        flex-direction: column-reverse;
+    }
+
+    .ai-rag-actions button {
+        width: 100%;
+    }
+}

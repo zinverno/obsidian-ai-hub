@@ -298,6 +298,7 @@ function copyMatch(
     path: metadata.path,
     headingPath: [...metadata.headingPath],
     ordinal: metadata.ordinal,
+    contentHash: metadata.contentHash,
     source: { ...metadata.source },
     score,
   };
