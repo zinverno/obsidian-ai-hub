@@ -1,4 +1,12 @@
-import { App, MarkdownView, Modal, Notice, TFile } from "obsidian";
+import {
+  App,
+  Component,
+  MarkdownRenderer,
+  MarkdownView,
+  Modal,
+  Notice,
+  TFile,
+} from "obsidian";
 import { t as tr } from "../i18n";
 import { semanticBreadcrumb } from "../semantic/semanticSearchModal";
 import type {
@@ -67,6 +75,7 @@ export class AskVaultModal extends Modal {
   private requestGeneration = 0;
   private abortController: AbortController | null = null;
   private streamedAnswer = "";
+  private answerRenderComponent: Component | null = null;
 
   constructor(
     app: App,
@@ -77,6 +86,7 @@ export class AskVaultModal extends Modal {
 
   onOpen(): void {
     this.openState = true;
+    this.unloadAnswerRenderComponent();
     this.titleEl.setText(tr("Спросить Vault"));
     this.contentEl.empty();
     this.modalEl.addClass("ai-rag-shell");
@@ -128,6 +138,7 @@ export class AskVaultModal extends Modal {
     this.abortController = null;
     this.busy = false;
     this.streamedAnswer = "";
+    this.unloadAnswerRenderComponent();
     this.contentEl.empty();
     this.questionEl = null;
     this.askButton = null;
@@ -151,6 +162,8 @@ export class AskVaultModal extends Modal {
     const controller = new AbortController();
     this.abortController = controller;
     this.setBusy(true);
+    this.unloadAnswerRenderComponent();
+    this.answerEl?.removeClass("ai-rag-answer-markdown");
     this.answerEl?.empty();
     this.sourcesEl?.empty();
     this.setStatus(tr("Ищу контекст в Vault..."), "loading");
@@ -181,6 +194,9 @@ export class AskVaultModal extends Modal {
         controller.signal,
       );
       if (!this.isCurrent(request)) return;
+      this.setGenerationActive(false);
+      await this.renderFinalAnswer(result.answer, request);
+      if (!this.isCurrent(request)) return;
       this.setStatus(
         tr("Ответ готов. Источников: {n}.", {
           n: result.context.sources.length,
@@ -201,6 +217,54 @@ export class AskVaultModal extends Modal {
         this.setBusy(false);
       }
     }
+  }
+
+  private async renderFinalAnswer(
+    answer: string,
+    request: number,
+  ): Promise<void> {
+    const answerEl = this.answerEl;
+    if (!answerEl || !this.isCurrent(request)) return;
+
+    this.unloadAnswerRenderComponent();
+    answerEl.empty();
+    answerEl.addClass("ai-rag-answer-markdown");
+
+    const component = new Component();
+    this.answerRenderComponent = component;
+
+    try {
+      component.load();
+      // The answer is synthetic, so it must not inherit a retrieved note path.
+      await MarkdownRenderer.render(this.app, answer, answerEl, "", component);
+    } catch (error) {
+      if (this.answerRenderComponent === component) {
+        this.answerRenderComponent = null;
+        component.unload();
+      }
+      if (this.isCurrent(request) && this.answerEl === answerEl) {
+        answerEl.removeClass("ai-rag-answer-markdown");
+        answerEl.empty();
+        answerEl.setText(answer);
+      }
+      throw error;
+    }
+
+    if (
+      !this.isCurrent(request) ||
+      this.answerEl !== answerEl ||
+      this.answerRenderComponent !== component
+    ) {
+      // A close/reset can finish while asynchronous post-processing is pending.
+      answerEl.empty();
+    }
+  }
+
+  private unloadAnswerRenderComponent(): void {
+    const component = this.answerRenderComponent;
+    if (!component) return;
+    this.answerRenderComponent = null;
+    component.unload();
   }
 
   private renderSources(context: RagContext): void {

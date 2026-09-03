@@ -1413,6 +1413,56 @@
     display: none;
 }
 
+.ai-rag-answer.ai-rag-answer-markdown {
+    white-space: normal;
+}
+
+.ai-rag-answer.ai-rag-answer-markdown > :first-child,
+.ai-rag-answer.ai-rag-answer-markdown .markdown-preview-section > :first-child {
+    margin-top: 0;
+}
+
+.ai-rag-answer.ai-rag-answer-markdown > :last-child,
+.ai-rag-answer.ai-rag-answer-markdown .markdown-preview-section > :last-child {
+    margin-bottom: 0;
+}
+
+.ai-rag-answer.ai-rag-answer-markdown :is(
+    p,
+    ul,
+    ol,
+    li,
+    h1,
+    h2,
+    h3,
+    h4,
+    h5,
+    h6,
+    blockquote
+) {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+
+.ai-rag-answer.ai-rag-answer-markdown ul,
+.ai-rag-answer.ai-rag-answer-markdown ol {
+    padding-inline-start: 1.5em;
+}
+
+.ai-rag-answer.ai-rag-answer-markdown pre {
+    box-sizing: border-box;
+    max-width: 100%;
+    overflow-x: auto;
+    white-space: pre;
+}
+
+.ai-rag-answer.ai-rag-answer-markdown pre code {
+    overflow-wrap: normal;
+    word-break: normal;
+    white-space: inherit;
+}
+
 .ai-rag-sources {
     display: flex;
     flex: 1 1 0;

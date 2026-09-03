@@ -61,12 +61,21 @@ const mocks = vi.hoisted(() => {
       this.cls = [this.cls, ...values].filter(Boolean).join(" ");
     }
 
+    removeClass(...values: string[]) {
+      const removed = new Set(values);
+      this.cls = this.cls
+        .split(/\s+/)
+        .filter((value) => !removed.has(value))
+        .join(" ");
+    }
+
     empty() {
       this.children.length = 0;
       this.text = "";
     }
 
     setText(value: string) {
+      this.children.length = 0;
       this.text = value;
     }
 
@@ -110,6 +119,31 @@ const mocks = vi.hoisted(() => {
     }
   }
 
+  class Component {
+    static readonly instances: Component[] = [];
+    readonly load = vi.fn();
+    readonly unload = vi.fn();
+
+    constructor() {
+      Component.instances.push(this);
+    }
+  }
+
+  const MarkdownRenderer = {
+    render: vi.fn(async (
+      _app: unknown,
+      markdown: string,
+      el: FakeElement,
+      _sourcePath: string,
+      _component: Component,
+    ) => {
+      el.createDiv({
+        cls: "mock-rendered-markdown",
+        text: markdown,
+      });
+    }),
+  };
+
   class TFile {
     path = "";
   }
@@ -147,11 +181,21 @@ const mocks = vi.hoisted(() => {
     }
   }
 
-  return { FakeElement, MarkdownView, Modal, Notice, TFile };
+  return {
+    Component,
+    FakeElement,
+    MarkdownRenderer,
+    MarkdownView,
+    Modal,
+    Notice,
+    TFile,
+  };
 });
 
 vi.mock("obsidian", () => ({
   App: class {},
+  Component: mocks.Component,
+  MarkdownRenderer: mocks.MarkdownRenderer,
   MarkdownView: mocks.MarkdownView,
   Modal: mocks.Modal,
   Notice: mocks.Notice,
@@ -203,6 +247,21 @@ function flush(): Promise<void> {
 }
 
 function harness() {
+  mocks.Component.instances.length = 0;
+  mocks.MarkdownRenderer.render.mockReset();
+  mocks.MarkdownRenderer.render.mockImplementation(async (
+    _app,
+    markdown,
+    el,
+    _sourcePath,
+    _component,
+  ) => {
+    el.createDiv({
+      cls: "mock-rendered-markdown",
+      text: markdown,
+    });
+  });
+
   const file = new mocks.TFile();
   file.path = "Folder/Alpha.md";
   const view = new mocks.MarkdownView();
@@ -288,6 +347,52 @@ describe("AskVaultModal", () => {
     );
   });
 
+  it("streams plain text, then renders the complete Markdown exactly once", async () => {
+    const markdown = "# Title\n\n**bold**\n\n- one\n- two\n\n`code`";
+    let finish = () => {};
+    const { app, content, delegate } = harness();
+    delegate.askVault.mockImplementation(
+      (_question, callbacks) =>
+        new Promise((resolve) => {
+          callbacks.onContext?.(context());
+          callbacks.onToken?.("# Title\n\n**bold**");
+          callbacks.onToken?.("\n\n- one\n- two\n\n`code`");
+          finish = () => resolve(result(markdown));
+        }),
+    );
+
+    const textarea = content.findByTag("textarea")[0];
+    const answer = content.findByClass("ai-rag-answer")[0];
+    textarea.value = "question";
+    content.findByClass("mod-cta")[0].trigger("click");
+
+    expect(answer.text).toBe(markdown);
+    expect(answer.findByClass("mock-rendered-markdown")).toHaveLength(0);
+    expect(mocks.MarkdownRenderer.render).not.toHaveBeenCalled();
+
+    finish();
+    await flush();
+
+    const component = mocks.Component.instances[0];
+    expect(component.load).toHaveBeenCalledOnce();
+    expect(mocks.MarkdownRenderer.render).toHaveBeenCalledOnce();
+    expect(component.load.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.MarkdownRenderer.render.mock.invocationCallOrder[0],
+    );
+    expect(mocks.MarkdownRenderer.render).toHaveBeenCalledWith(
+      app,
+      markdown,
+      answer,
+      "",
+      component,
+    );
+    expect(answer.text).toBe("");
+    expect(answer.findByClass("mock-rendered-markdown")[0].text).toBe(
+      markdown,
+    );
+    expect(answer.findByClass("ai-rag-answer-markdown")).toHaveLength(1);
+  });
+
   it("streams plain text and renders only trusted source objects", async () => {
     const { content } = harness();
     const textarea = content.findByTag("textarea")[0];
@@ -295,10 +400,11 @@ describe("AskVaultModal", () => {
     content.findByClass("mod-cta")[0].trigger("click");
     await flush();
 
-    expect(content.findByClass("ai-rag-answer")[0].text).toBe(
+    expect(mocks.MarkdownRenderer.render.mock.calls[0][1]).toBe(
       "Grounded [S1]",
     );
-    expect(content.findByClass("ai-rag-source")).toHaveLength(1);
+    const sourceCard = content.findByClass("ai-rag-source")[0];
+    expect(sourceCard.findByClass("mock-rendered-markdown")).toHaveLength(0);
     expect(content.findByClass("ai-rag-source-title")[0].text).toBe(
       "[S1] Folder/Alpha.md",
     );
@@ -365,7 +471,9 @@ describe("AskVaultModal", () => {
     content.findByClass("mod-cta")[0].trigger("click");
     await flush();
 
-    expect(content.findByClass("ai-rag-answer")[0].text).toBe("Unknown [S999]");
+    expect(mocks.MarkdownRenderer.render.mock.calls[0][1]).toBe(
+      "Unknown [S999]",
+    );
     expect(content.findByClass("ai-rag-source")).toHaveLength(1);
     expect(content.findByClass("ai-rag-source-title")[0].text).not.toContain(
       "S999",
@@ -390,6 +498,56 @@ describe("AskVaultModal", () => {
     expect(ask.disabled).toBe(true);
     release();
     await flush();
+  });
+
+  it("unloads completed Markdown before starting a clean new stream", async () => {
+    let invocation = 0;
+    let finishSecond = () => {};
+    const { content, delegate } = harness();
+    delegate.askVault.mockImplementation(
+      (_question, callbacks) => {
+        invocation++;
+        callbacks.onContext?.(context());
+        if (invocation === 1) {
+          callbacks.onToken?.("first partial");
+          return Promise.resolve(result("# First"));
+        }
+        callbacks.onToken?.("second partial");
+        return new Promise((resolve) => {
+          finishSecond = () => resolve(result("## Second"));
+        });
+      },
+    );
+    const textarea = content.findByTag("textarea")[0];
+    const ask = content.findByClass("mod-cta")[0];
+    const answer = content.findByClass("ai-rag-answer")[0];
+
+    textarea.value = "first";
+    ask.trigger("click");
+    await flush();
+    const firstComponent = mocks.Component.instances[0];
+    expect(answer.findByClass("mock-rendered-markdown")[0].text).toBe(
+      "# First",
+    );
+
+    textarea.value = "second";
+    ask.trigger("click");
+
+    expect(firstComponent.unload).toHaveBeenCalledOnce();
+    expect(firstComponent.unload.mock.invocationCallOrder[0]).toBeLessThan(
+      delegate.askVault.mock.invocationCallOrder[1],
+    );
+    expect(answer.text).toBe("second partial");
+    expect(answer.findByClass("mock-rendered-markdown")).toHaveLength(0);
+    expect(answer.findByClass("ai-rag-answer-markdown")).toHaveLength(0);
+    expect(mocks.MarkdownRenderer.render).toHaveBeenCalledOnce();
+
+    finishSecond();
+    await flush();
+
+    expect(mocks.MarkdownRenderer.render).toHaveBeenCalledTimes(2);
+    expect(mocks.MarkdownRenderer.render.mock.calls[1][1]).toBe("## Second");
+    expect(mocks.Component.instances[1].load).toHaveBeenCalledOnce();
   });
 
   it("enables cancel only after retrieval materializes the context", async () => {
@@ -425,6 +583,7 @@ describe("AskVaultModal", () => {
     delegate.askVault.mockImplementation(
       (_question, callbacks, signal) => {
         callbacks.onContext?.(context());
+        callbacks.onToken?.("partial **bold**");
         return new Promise((_resolve, reject) => {
           observed = signal;
           signal.addEventListener("abort", () => {
@@ -448,6 +607,53 @@ describe("AskVaultModal", () => {
     expect(observed?.aborted).toBe(true);
     expect(content.findByClass("ai-rag-status")[0].text).toBe(
       "Генерация отменена.",
+    );
+    expect(content.findByClass("ai-rag-answer")[0].text).toBe(
+      "partial **bold**",
+    );
+    expect(mocks.MarkdownRenderer.render).not.toHaveBeenCalled();
+  });
+
+  it("keeps a failed partial answer plain and skips Markdown rendering", async () => {
+    const { content, delegate } = harness();
+    delegate.askVault.mockImplementation(async (
+      _question,
+      callbacks,
+    ) => {
+      callbacks.onContext?.(context());
+      callbacks.onToken?.("failed **partial**");
+      throw new Error("generation failed");
+    });
+    const textarea = content.findByTag("textarea")[0];
+    textarea.value = "question";
+    content.findByClass("mod-cta")[0].trigger("click");
+    await flush();
+
+    expect(content.findByClass("ai-rag-answer")[0].text).toBe(
+      "failed **partial**",
+    );
+    expect(content.findByClass("ai-rag-status")[0].text).toBe("safe RAG error");
+    expect(mocks.MarkdownRenderer.render).not.toHaveBeenCalled();
+  });
+
+  it("unloads a failed renderer and preserves the completed plain text", async () => {
+    const { content } = harness();
+    mocks.MarkdownRenderer.render.mockRejectedValue(
+      new Error("render failed"),
+    );
+    const textarea = content.findByTag("textarea")[0];
+    const answer = content.findByClass("ai-rag-answer")[0];
+    textarea.value = "question";
+    content.findByClass("mod-cta")[0].trigger("click");
+    await flush();
+
+    const component = mocks.Component.instances[0];
+    expect(mocks.MarkdownRenderer.render).toHaveBeenCalledOnce();
+    expect(component.unload).toHaveBeenCalledOnce();
+    expect(answer.text).toBe("Grounded [S1]");
+    expect(answer.findByClass("ai-rag-answer-markdown")).toHaveLength(0);
+    expect(content.findByClass("ai-rag-status")[0].text).toBe(
+      "safe RAG error",
     );
   });
 
@@ -493,6 +699,7 @@ describe("AskVaultModal", () => {
     expect(generation).not.toHaveBeenCalled();
     expect(content.children).toEqual([]);
     expect(content.text).not.toContain("late secret");
+    expect(mocks.MarkdownRenderer.render).not.toHaveBeenCalled();
   });
 
   it("aborts on close during generation and ignores late streamed tokens", async () => {
@@ -526,6 +733,46 @@ describe("AskVaultModal", () => {
     expect(signal?.aborted).toBe(true);
     expect(content.children).toEqual([]);
     expect(content.text).not.toContain("late secret");
+    expect(mocks.MarkdownRenderer.render).not.toHaveBeenCalled();
+  });
+
+  it("unloads the renderer component and clears late render DOM on close", async () => {
+    let finishRender = () => {};
+    let renderTarget: InstanceType<typeof mocks.FakeElement> | undefined;
+    const { content, modal } = harness();
+    mocks.MarkdownRenderer.render.mockImplementation(
+      async (_app, markdown, el) => {
+        renderTarget = el;
+        await new Promise<void>((resolve) => {
+          finishRender = () => {
+            el.createDiv({
+              cls: "mock-rendered-markdown",
+              text: markdown,
+            });
+            resolve();
+          };
+        });
+      },
+    );
+    const textarea = content.findByTag("textarea")[0];
+    textarea.value = "question";
+    content.findByClass("mod-cta")[0].trigger("click");
+    await flush();
+
+    const component = mocks.Component.instances[0];
+    expect(component.load).toHaveBeenCalledOnce();
+    expect(mocks.MarkdownRenderer.render).toHaveBeenCalledOnce();
+
+    modal.close();
+    expect(component.unload).toHaveBeenCalledOnce();
+    expect(content.children).toEqual([]);
+
+    finishRender();
+    await flush();
+
+    expect(component.unload).toHaveBeenCalledOnce();
+    expect(renderTarget?.children).toEqual([]);
+    expect(content.children).toEqual([]);
   });
 
   it("opens the exact trusted path and navigates to the reconstructed line", async () => {
@@ -595,5 +842,16 @@ describe("AskVaultModal", () => {
     expect(title).toMatch(/word-break:\s*break-word/);
     const answer = cssRule(styles, ".ai-rag-answer");
     expect(answer).toMatch(/flex:\s*0 0 auto/);
+    const markdownAnswer = cssRule(
+      styles,
+      ".ai-rag-answer.ai-rag-answer-markdown",
+    );
+    const codeBlock = cssRule(
+      styles,
+      ".ai-rag-answer.ai-rag-answer-markdown pre",
+    );
+    expect(markdownAnswer).toMatch(/white-space:\s*normal/);
+    expect(codeBlock).toMatch(/max-width:\s*100%/);
+    expect(codeBlock).toMatch(/overflow-x:\s*auto/);
   });
 });
