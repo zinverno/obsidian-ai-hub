@@ -11,6 +11,7 @@ import { COMPANION_PROTOCOL_VERSION } from "./types";
 
 const BATCH_SIZE = 50;
 const MAX_ATTEMPTS = 2;
+const CONFIGURATION_INVALIDATED = Symbol("configuration-invalidated");
 
 export interface CompanionSyncServiceOptions {
   clientFactory?: (settings: CompanionSettings) => CompanionClientPort;
@@ -25,6 +26,7 @@ export interface CompanionClientPort {
 
 export interface CompanionSyncPort {
   getStatus: (enabled: boolean) => CompanionConnectionStatus;
+  invalidateConfiguration: () => void;
   testConnection: (settings: CompanionSettings, signal?: AbortSignal) => Promise<void>;
   reconcile: (settings: CompanionSettings, snapshot: CompanionSnapshot, signal?: AbortSignal) => Promise<void>;
   enqueueIncremental: (settings: CompanionSettings, change: CompanionIncrementalChange) => void;
@@ -36,6 +38,7 @@ export class CompanionSyncService implements CompanionSyncPort {
   private readonly delay: (milliseconds: number) => Promise<void>;
   private tail: Promise<void> = Promise.resolve();
   private status: CompanionConnectionStatus = { kind: "idle" };
+  private configurationEpoch = 0;
   private disposed = false;
 
   constructor(options: CompanionSyncServiceOptions = {}) {
@@ -47,25 +50,36 @@ export class CompanionSyncService implements CompanionSyncPort {
     return enabled ? { ...this.status } : { kind: "disabled" };
   }
 
+  invalidateConfiguration(): void {
+    this.configurationEpoch++;
+    this.status = { kind: "idle" };
+  }
+
   async testConnection(settings: CompanionSettings, signal?: AbortSignal): Promise<void> {
+    const epoch = this.configurationEpoch;
     this.status = { kind: "syncing" };
     try {
       await this.clientFactory(settings).status(signal);
+      if (!this.isCurrent(epoch)) return;
       this.status = { kind: "ready", lastSuccessAt: Date.now() };
     } catch (error) {
+      if (!this.isCurrent(epoch)) return;
       this.recordError(error);
       throw error;
     }
   }
 
   async reconcile(settings: CompanionSettings, snapshot: CompanionSnapshot, signal?: AbortSignal): Promise<void> {
+    if (this.disposed || !settings.enabled) return;
+    const epoch = this.configurationEpoch;
     const frozenSettings = { ...settings };
     const pending = this.tail.then(async () => {
-      if (this.disposed) return;
+      if (!this.isCurrent(epoch)) return;
       this.status = { kind: "syncing" };
       try {
         const client = this.clientFactory(frozenSettings);
-        const plan = await this.withRetry(() => client.plan(frozenSettings.vaultId, snapshot, signal));
+        const plan = await this.withRetry(epoch, () => client.plan(frozenSettings.vaultId, snapshot, signal));
+        if (plan === CONFIGURATION_INVALIDATED || !this.isCurrent(epoch)) return;
         const notes = new Map(snapshot.notes.map((note) => [note.path, note]));
         const operations: CompanionSyncOperation[] = [];
         if (!plan.replaceVault) {
@@ -75,9 +89,19 @@ export class CompanionSyncService implements CompanionSyncPort {
           const note = notes.get(path);
           if (note) operations.push({ type: "UPSERT", note });
         }
-        await this.applyOperations(client, frozenSettings, snapshot, operations, plan.replaceVault, signal);
+        const applied = await this.applyOperations(
+          epoch,
+          client,
+          frozenSettings,
+          snapshot,
+          operations,
+          plan.replaceVault,
+          signal,
+        );
+        if (!applied || !this.isCurrent(epoch)) return;
         this.status = { kind: "ready", lastSuccessAt: Date.now() };
       } catch (error) {
+        if (!this.isCurrent(epoch)) return;
         this.recordError(error);
         throw error;
       }
@@ -88,9 +112,10 @@ export class CompanionSyncService implements CompanionSyncPort {
 
   enqueueIncremental(settings: CompanionSettings, change: CompanionIncrementalChange): void {
     if (this.disposed || !settings.enabled) return;
+    const epoch = this.configurationEpoch;
     const frozenSettings = { ...settings };
     this.tail = this.tail.then(async () => {
-      if (this.disposed) return;
+      if (!this.isCurrent(epoch)) return;
       this.status = { kind: "syncing" };
       try {
         const client = this.clientFactory(frozenSettings);
@@ -111,9 +136,18 @@ export class CompanionSyncService implements CompanionSyncPort {
         for (const note of [...change.snapshot.notes].sort((left, right) => left.path.localeCompare(right.path))) {
           if (!consumedUpserts.has(note.path)) operations.push({ type: "UPSERT", note });
         }
-        await this.applyOperations(client, frozenSettings, change.snapshot, operations, false);
+        const applied = await this.applyOperations(
+          epoch,
+          client,
+          frozenSettings,
+          change.snapshot,
+          operations,
+          false,
+        );
+        if (!applied || !this.isCurrent(epoch)) return;
         this.status = { kind: "ready", lastSuccessAt: Date.now() };
       } catch (error) {
+        if (!this.isCurrent(epoch)) return;
         this.recordError(error);
       }
     });
@@ -125,23 +159,27 @@ export class CompanionSyncService implements CompanionSyncPort {
 
   async dispose(): Promise<void> {
     this.disposed = true;
+    this.configurationEpoch++;
     await this.tail;
   }
 
   private async applyOperations(
+    epoch: number,
     client: CompanionClientPort,
     settings: CompanionSettings,
     snapshot: CompanionSnapshot,
     operations: readonly CompanionSyncOperation[],
     replaceVault: boolean,
     signal?: AbortSignal,
-  ): Promise<void> {
-    if (operations.length === 0 && !replaceVault) return;
+  ): Promise<boolean> {
+    if (!this.isCurrent(epoch)) return false;
+    if (operations.length === 0 && !replaceVault) return true;
     const batches = operations.length === 0 ? [[]] : Array.from(
       { length: Math.ceil(operations.length / BATCH_SIZE) },
       (_value, index) => operations.slice(index * BATCH_SIZE, (index + 1) * BATCH_SIZE),
     );
     for (let index = 0; index < batches.length; index++) {
+      if (!this.isCurrent(epoch)) return false;
       const batch: CompanionSyncBatch = {
         protocolVersion: COMPANION_PROTOCOL_VERSION,
         generation: snapshot.generation,
@@ -149,24 +187,40 @@ export class CompanionSyncService implements CompanionSyncPort {
         operations: [...(batches[index] ?? [])],
       };
       if (replaceVault && index === 0) batch.replaceVault = true;
-      await this.withRetry(() => client.applyBatch(settings.vaultId, batch, signal));
+      const result = await this.withRetry(
+        epoch,
+        () => client.applyBatch(settings.vaultId, batch, signal),
+      );
+      if (result === CONFIGURATION_INVALIDATED) return false;
     }
+    return this.isCurrent(epoch);
   }
 
-  private async withRetry<T>(operation: () => Promise<T>): Promise<T> {
+  private async withRetry<T>(
+    epoch: number,
+    operation: () => Promise<T>,
+  ): Promise<T | typeof CONFIGURATION_INVALIDATED> {
     let lastError: unknown;
     for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+      if (!this.isCurrent(epoch)) return CONFIGURATION_INVALIDATED;
       try {
-        return await operation();
+        const result = await operation();
+        return this.isCurrent(epoch) ? result : CONFIGURATION_INVALIDATED;
       } catch (error) {
+        if (!this.isCurrent(epoch)) return CONFIGURATION_INVALIDATED;
         lastError = error;
         const retryable = error instanceof CompanionClientError &&
           (error.code === "TIMEOUT" || error.code === "UNREACHABLE" || error.code === "SERVER_ERROR");
         if (!retryable || attempt + 1 >= MAX_ATTEMPTS) throw error;
         await this.delay(250 * (attempt + 1));
+        if (!this.isCurrent(epoch)) return CONFIGURATION_INVALIDATED;
       }
     }
     throw lastError;
+  }
+
+  private isCurrent(epoch: number): boolean {
+    return !this.disposed && epoch === this.configurationEpoch;
   }
 
   private recordError(error: unknown): void {

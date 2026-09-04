@@ -1695,6 +1695,7 @@ describe("automatic semantic index synchronization", () => {
     const slow = manualGate();
     const companion: CompanionSyncPort = {
       getStatus: vi.fn(() => ({ kind: "syncing" as const })),
+      invalidateConfiguration: vi.fn(),
       testConnection: vi.fn(async () => undefined),
       reconcile: vi.fn(async () => { await slow.wait; }),
       enqueueIncremental: vi.fn(),
@@ -1743,6 +1744,7 @@ describe("automatic semantic index synchronization", () => {
     const observed: boolean[] = [];
     const companion: CompanionSyncPort = {
       getStatus: vi.fn(() => ({ kind: "idle" as const })),
+      invalidateConfiguration: vi.fn(),
       testConnection: vi.fn(async () => undefined),
       reconcile: vi.fn(async () => { observed.push(barrier.insideShared); }),
       enqueueIncremental: vi.fn(() => { observed.push(barrier.insideShared); }),
@@ -1767,6 +1769,7 @@ describe("automatic semantic index synchronization", () => {
     await first.controller.indexVault();
     const companion: CompanionSyncPort = {
       getStatus: vi.fn(() => ({ kind: "idle" as const })),
+      invalidateConfiguration: vi.fn(),
       testConnection: vi.fn(async () => undefined),
       reconcile: vi.fn(async () => undefined),
       enqueueIncremental: vi.fn(),
@@ -1789,6 +1792,7 @@ describe("automatic semantic index synchronization", () => {
   it("does not build an absent semantic index merely because Companion is enabled", async () => {
     const companion: CompanionSyncPort = {
       getStatus: vi.fn(() => ({ kind: "idle" as const })),
+      invalidateConfiguration: vi.fn(),
       testConnection: vi.fn(async () => undefined),
       reconcile: vi.fn(async () => undefined),
       enqueueIncremental: vi.fn(),

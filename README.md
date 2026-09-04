@@ -210,6 +210,7 @@ Vault Audit AI separates local storage from provider-side processing so you can 
 - Companion is disabled by default. Entering an endpoint alone does not upload Vault data.
 - When Companion sync is enabled, the configured endpoint receives a stable random Vault ID, vault-relative paths, current Markdown, full chunk text, chunk/source metadata, embeddings, and semantic descriptor metadata. Localhost keeps that mirror on the same machine; a remote endpoint transmits and persists it on that server.
 - Remote Companion endpoints must use HTTPS. The Companion bearer token is independent of embedding and language-model credentials; provider API keys are never sent to Companion.
+- Changing Companion enablement, endpoint, token, timeout, or identity invalidates obsolete queued synchronization. An old plan cannot start later batches or retries, and disabling synchronization does not delete either the local semantic index or already mirrored Companion data.
 - Companion has no telemetry, MCP, agents, note editing, or Vault write-back.
 - Writing, batch, and audit operations send the content required for the requested action to the configured language-model provider.
 - Clipboard insertion writes generated output to the system clipboard.
@@ -298,6 +299,7 @@ Clear and rebuild are explicit operations and do not modify source notes.
 - The vector store does not use an ANN or HNSW index.
 - Companion v0 is a self-hosted read-only mirror. It provides no retrieval API for end users, MCP, dashboard, accounts, TLS termination, or write-back; read-only MCP is deferred to a later stage.
 - Companion requires Node.js 24 or newer and uses Node's built-in SQLite API, which Node 24 currently labels experimental.
+- Obsidian `requestUrl` cannot physically cancel a transport already handed off. Timeout, abort, disable, or configuration invalidation prevents subsequent queued requests, plan-to-batch transitions, batches, and retries, but the already-started HTTP transport may still finish.
 - Similarity search performs a local linear scan and is intended for small and medium personal vaults.
 - Similar Notes represents a document as the normalized mean of its chunk vectors; broad or multi-topic notes may therefore receive less intuitive rankings.
 - Potential duplicate detection compares exact document-vector pairs in quadratic time and is intended for small and medium personal vaults.

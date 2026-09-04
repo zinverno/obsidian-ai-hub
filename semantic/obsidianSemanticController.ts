@@ -449,7 +449,7 @@ export class ObsidianSemanticController {
   }
 
   notifyCompanionSettingsChanged(): void {
-    // Client configuration is snapshotted per request; editing settings never uploads data.
+    this.companionService.invalidateConfiguration();
   }
 
   async testCompanionConnection(signal?: AbortSignal): Promise<void> {
