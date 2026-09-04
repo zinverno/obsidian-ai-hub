@@ -20,5 +20,5 @@
     "useUnknownInCatchVariables": true
   },
   "include": ["**/*.ts"],
-  "exclude": ["node_modules", "*.js"]
+  "exclude": ["node_modules", "companion", "*.js"]
 }

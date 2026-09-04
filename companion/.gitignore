@@ -1,0 +1,7 @@
+dist/
+coverage/
+data/
+.env
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
