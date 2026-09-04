@@ -9,6 +9,7 @@ import {
   IndexingCompatibilityError,
   IndexingService,
   ObsidianMarkdownDocumentSource,
+  normalizeEmbeddingBaseUrl,
 } from "../indexing";
 import {
   LocalVectorStore,
@@ -141,6 +142,15 @@ export function createObsidianSemanticRuntime(
       vectorStore: store,
       source,
       ragContextBuilder: new RagContextBuilder(searchService, source, chunker),
+      chunker,
+      companionDescriptor: {
+        providerId: provider.id,
+        model: provider.model,
+        baseUrl: normalizeEmbeddingBaseUrl(settings.embeddingBaseUrl),
+        dimensions: stats.dimensions,
+        embeddingSpaceId: stats.embeddingSpaceId,
+        normalized: true,
+      },
     };
   });
 }

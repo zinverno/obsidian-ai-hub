@@ -209,6 +209,15 @@ function createIntegrationHarness() {
         source,
         chunker,
       ),
+      chunker,
+      companionDescriptor: {
+        providerId: provider.id,
+        model: provider.model,
+        baseUrl: "https://example.test/v1",
+        dimensions: stats.dimensions,
+        embeddingSpaceId: stats.embeddingSpaceId,
+        normalized: true as const,
+      },
     };
   });
 
@@ -323,6 +332,48 @@ describe("LazySemanticRuntime", () => {
     expect(harness.runtime.getStats().vectorCount).toBe(1);
     const results = await harness.runtime.search("beta");
     expect(results.map((result) => result.path)).toEqual(["Only.md"]);
+  });
+
+  it("captures full Companion state from committed vectors with zero extra embedding calls", async () => {
+    const harness = createIntegrationHarness();
+    await harness.runtime.indexVault();
+    const embeddingCallsBefore = harness.provider.embedCalls.length;
+
+    const snapshot = await harness.runtime.captureCompanionSnapshot?.();
+
+    expect(harness.provider.embedCalls).toHaveLength(embeddingCallsBefore);
+    expect(snapshot).toMatchObject({
+      generation: 1,
+      descriptor: {
+        providerId: "openai-compatible",
+        model: "semantic-test",
+        dimensions: 3,
+        normalized: true,
+      },
+      notes: [{
+        path: "Alpha.md",
+        content: "alpha text",
+        chunks: [{
+          chunkId: "Alpha.md:0",
+          text: "alpha text",
+          headingPath: ["Alpha"],
+          source: { startOffset: 0, endOffset: 10, startLine: 0, endLine: 0 },
+          embedding: [1, 0, 0],
+        }],
+      }],
+    });
+  });
+
+  it("omits locally stale note text instead of pairing it with old vectors", async () => {
+    const harness = createIntegrationHarness();
+    await harness.runtime.indexVault();
+    harness.source.documents[0] = { path: "Alpha.md", content: "changed without index commit" };
+    const embeddingCallsBefore = harness.provider.embedCalls.length;
+
+    const snapshot = await harness.runtime.captureCompanionSnapshot?.();
+
+    expect(snapshot?.notes).toEqual([]);
+    expect(harness.provider.embedCalls).toHaveLength(embeddingCallsBefore);
   });
 
   it("clears the compatible store and reports updated stats", async () => {

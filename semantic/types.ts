@@ -5,6 +5,7 @@ import type {
   IndexingExecutionOptions,
   IndexingRunResult,
 } from "../indexing/types";
+import type { CompanionSnapshot } from "../companionSync/types";
 
 export interface SemanticSearchOptions {
   limit?: number;
@@ -94,6 +95,10 @@ export interface SemanticRuntime {
   findPotentialDuplicates: (
     options?: SemanticDuplicateOptions,
   ) => Promise<SemanticDuplicatePair[]>;
+  /** Materializes note text, chunk text, metadata, and existing vectors without embedding. */
+  captureCompanionSnapshot?: (
+    paths?: readonly string[],
+  ) => Promise<CompanionSnapshot>;
   clear: () => Promise<void>;
   getStats: () => SemanticRuntimeStats;
 }

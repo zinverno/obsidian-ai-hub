@@ -38,6 +38,7 @@ import type {
 } from "../rag/types";
 import { ObsidianSemanticController } from "../semantic/obsidianSemanticController";
 import type { SemanticRuntime } from "../semantic/types";
+import type { CompanionSyncPort } from "../companionSync";
 
 const INDEX_RESULT = {
   mode: "reconcile" as const,
@@ -83,6 +84,13 @@ function settings(): AIHubSettings {
       openAICompatibleApiKey: "embed-key",
     },
     semanticAutoSyncSuspended: false,
+    companion: {
+      enabled: false,
+      endpoint: "http://127.0.0.1:27124",
+      token: "",
+      timeoutMs: 5000,
+      vaultId: "11111111-1111-4111-8111-111111111111",
+    },
   };
 }
 
@@ -145,6 +153,18 @@ function fakeRuntime(initialContext = ragContext()) {
     buildRagContext: vi.fn(async () => currentContext),
     findSimilarNotes: vi.fn(async () => []),
     findPotentialDuplicates: vi.fn(async () => []),
+    captureCompanionSnapshot: vi.fn(async () => ({
+      generation,
+      descriptor: {
+        providerId: "openai-compatible",
+        model: "embed-model",
+        baseUrl: "https://embed.example/v1",
+        dimensions: 3,
+        embeddingSpaceId: "space",
+        normalized: true as const,
+      },
+      notes: [],
+    })),
     clear: vi.fn(async () => {
       count = 0;
       generation++;
@@ -166,7 +186,7 @@ function fakeRuntime(initialContext = ragContext()) {
   };
 }
 
-function createHarness() {
+function createHarness(companionService?: CompanionSyncPort) {
   const pluginSettings = settings();
   const commands: Command[] = [];
   const notices: string[] = [];
@@ -245,6 +265,7 @@ function createHarness() {
     resetStorage,
     probeIndex,
     autoSyncDebounceMs: 0,
+    companionService,
     notice: (message) => {
       notices.push(message);
       return { hide() {} };
@@ -473,5 +494,32 @@ describe("Ask your Vault controller integration", () => {
 
     expect(sentUser).toContain("old frozen source");
     expect(sentUser).not.toContain("future replacement source");
+  });
+
+  it("keeps Ask your Vault usable while Companion is slow", async () => {
+    const gate = manualGate();
+    const companion: CompanionSyncPort = {
+      getStatus: vi.fn(() => ({ kind: "syncing" as const })),
+      invalidateConfiguration: vi.fn(),
+      testConnection: vi.fn(async () => undefined),
+      reconcile: vi.fn(async () => { await gate.wait; }),
+      enqueueIncremental: vi.fn(),
+      dispose: vi.fn(async () => undefined),
+    };
+    const harness = createHarness(companion);
+    harness.plugin.settings.companion.enabled = true;
+    harness.plugin.settings.companion.token = "companion-secret";
+    await harness.controller.indexVault();
+    expect(companion.reconcile).toHaveBeenCalledOnce();
+
+    const result = await harness.controller.askVault(
+      "question",
+      {},
+      new AbortController().signal,
+    );
+
+    expect(result.answer).toBe("answer [S1]");
+    expect(result.context.sources[0].text).toBe("old frozen source");
+    gate.release();
   });
 });

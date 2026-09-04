@@ -7,7 +7,7 @@
     "dev": "node esbuild.config.mjs",
     "build": "node esbuild.config.mjs production",
     "lint": "eslint . --max-warnings 2",
-    "test": "vitest run",
+    "test": "vitest run --exclude 'companion/**'",
     "version": "node version-bump.mjs && git add manifest.json versions.json"
   },
   "keywords": [],

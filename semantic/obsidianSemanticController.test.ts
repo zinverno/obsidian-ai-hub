@@ -25,6 +25,7 @@ vi.mock("obsidian", () => ({
 }));
 
 import type { EmbeddingSettings } from "../embeddings/types";
+import type { CompanionSyncPort } from "../companionSync";
 import { buildEmbeddingSpaceId } from "../indexing";
 import { TFile } from "obsidian";
 import type { Command } from "obsidian";
@@ -175,6 +176,13 @@ function createHarness(
     settings: {
       semantic: settings,
       semanticAutoSyncSuspended: false,
+      companion: {
+        enabled: false,
+        endpoint: "http://127.0.0.1:27124",
+        token: "",
+        timeoutMs: 5000,
+        vaultId: "11111111-1111-4111-8111-111111111111",
+      },
     },
     addCommand: vi.fn((command: Command) => {
       commands.push(command);
@@ -249,6 +257,22 @@ describe("ObsidianSemanticController commands and lazy behavior", () => {
     });
   });
   afterEach(() => vi.unstubAllGlobals());
+
+  it("invalidates pending Companion work when connection settings change", () => {
+    const companion: CompanionSyncPort = {
+      getStatus: vi.fn(() => ({ kind: "idle" as const })),
+      invalidateConfiguration: vi.fn(),
+      testConnection: vi.fn(async () => undefined),
+      reconcile: vi.fn(async () => undefined),
+      enqueueIncremental: vi.fn(),
+      dispose: vi.fn(async () => undefined),
+    };
+    const harness = createHarness(semantic(), { companionService: companion });
+
+    harness.controller.notifyCompanionSettingsChanged();
+
+    expect(companion.invalidateConfiguration).toHaveBeenCalledOnce();
+  });
 
   it("registers all semantic commands without runtime or Vault reads", () => {
     const harness = createHarness();
