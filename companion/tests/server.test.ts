@@ -39,6 +39,14 @@ describe("Companion HTTP API", () => {
       allowRemoteBind: false,
       logLevel: "debug",
       bodyLimitBytes: 4096,
+      mcp: {
+        enabled: false,
+        token: "",
+        vaultId: "",
+        embeddingApiKey: "",
+        embeddingTimeoutMs: 30_000,
+        bodyLimitBytes: 1024 * 1024,
+      },
     };
     server = createCompanionServer(config, storage, logger);
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));

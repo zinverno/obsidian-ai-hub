@@ -8,6 +8,8 @@
     "node": ">=24.0.0"
   },
   "scripts": {
+    "audit:mutations": "node scripts/mutation-audit.mjs",
+    "smoke:mcp": "npm run build && node scripts/mcp-smoke.mjs",
     "build": "tsc -p tsconfig.json",
     "lint": "eslint . --max-warnings 0",
     "start": "node --env-file-if-exists=.env dist/server.js",
@@ -16,10 +18,16 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@modelcontextprotocol/client": "2.0.0",
     "@types/node": "^24.10.0",
     "eslint": "^10.10.0",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.69.0",
     "vitest": "^4.1.10"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/node": "2.0.0",
+    "@modelcontextprotocol/server": "2.0.0",
+    "zod": "4.2.0"
   }
 }
