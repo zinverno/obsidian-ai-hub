@@ -73,6 +73,13 @@ import type {
   SemanticStatus,
 } from "./types";
 import { normalizeVectorStoreBasePath } from "../vectorStore";
+import { CompanionClientError, CompanionSyncService } from "../companionSync";
+import type {
+  CompanionConnectionStatus,
+  CompanionIncrementalChange,
+  CompanionSnapshot,
+  CompanionSyncPort,
+} from "../companionSync";
 
 interface SemanticPluginHost {
   app: App;
@@ -119,6 +126,7 @@ export interface SemanticControllerDependencies {
   storeRegistry?: SemanticStoreRegistry;
   streamLanguageModel?: typeof streamOpenRouter;
   autoSyncDebounceMs?: number;
+  companionService?: CompanionSyncPort;
 }
 
 interface RuntimeSlot {
@@ -256,6 +264,8 @@ export class ObsidianSemanticController {
   private readonly streamLanguageModel: typeof streamOpenRouter;
   private readonly ragService: RagService;
   private readonly autoSync: SemanticAutoSync;
+  private readonly companionService: CompanionSyncPort;
+  private readonly pendingCompanionRenames = new Map<string, string>();
   private runtimeSlot: RuntimeSlot | null = null;
   private operationBusy = false;
   private settingsEpoch = 0;
@@ -306,6 +316,7 @@ export class ObsidianSemanticController {
     );
     this.resetStorage = dependencies.resetStorage ?? resetSemanticStorage;
     this.probeIndex = dependencies.probeIndex ?? probeSemanticIndex;
+    this.companionService = dependencies.companionService ?? new CompanionSyncService();
     const automaticSyncSuspended =
       this.plugin.settings.semanticAutoSyncSuspended === true;
     this.autoSyncPolicy = this.plugin.settings.semantic.enabled
@@ -408,6 +419,9 @@ export class ObsidianSemanticController {
       ) {
         this.autoSync.reconcile();
       }
+      if (this.plugin.settings.companion.enabled) {
+        void this.reconcileCompanionQuietly();
+      }
     });
   }
 
@@ -418,16 +432,58 @@ export class ObsidianSemanticController {
       this.autoSync.dispose();
       this.runtimeSlot = null;
     }
-    this.disposePromise = this.indexingQueue.then(
-      () => undefined,
-      () => undefined,
-    );
+    this.disposePromise = Promise.all([
+      this.indexingQueue.then(() => undefined, () => undefined),
+      this.companionService.dispose(),
+    ]).then(() => undefined);
     return this.disposePromise;
   }
 
   getSemanticStatus(): SemanticStatus {
     this.reconcileCachedStatus();
     return { ...this.status };
+  }
+
+  getCompanionStatus(): CompanionConnectionStatus {
+    return this.companionService.getStatus(this.plugin.settings.companion.enabled);
+  }
+
+  notifyCompanionSettingsChanged(): void {
+    // Client configuration is snapshotted per request; editing settings never uploads data.
+  }
+
+  async testCompanionConnection(signal?: AbortSignal): Promise<void> {
+    try {
+      await this.companionService.testConnection(
+        { ...this.plugin.settings.companion },
+        signal,
+      );
+      this.notice(tr("Companion connection successful."));
+    } catch (error) {
+      this.notice(this.companionErrorMessage(error), 8000);
+    }
+  }
+
+  async syncCompanionNow(signal?: AbortSignal): Promise<void> {
+    if (!this.plugin.settings.companion.enabled) {
+      this.notice(tr("Enable Companion before synchronizing Vault data."));
+      return;
+    }
+    try {
+      const snapshot = await this.captureCompanionSnapshot();
+      if (!snapshot) {
+        this.notice(tr("A usable semantic index is required before Companion sync."));
+        return;
+      }
+      await this.companionService.reconcile(
+        { ...this.plugin.settings.companion },
+        snapshot,
+        signal,
+      );
+      this.notice(tr("Companion mirror synchronized."));
+    } catch (error) {
+      this.notice(this.companionErrorMessage(error), 8000);
+    }
   }
 
   notifySettingsChanged(): void {
@@ -634,6 +690,7 @@ export class ObsidianSemanticController {
 
   async indexVault(): Promise<void> {
     if (!this.ensureEnabled() || !this.acquireOperation()) return;
+    let companionSnapshot: CompanionSnapshot | null = null;
     try {
       const fileCount = this.plugin.app.vault.getMarkdownFiles().length;
       const snapshot = safeSettingsSnapshot(this.plugin.settings.semantic);
@@ -673,12 +730,14 @@ export class ObsidianSemanticController {
             this.updateReadyStatus(runtime);
             await this.activateAutomaticSync();
             this.autoSyncFailureNoticed = false;
+            companionSnapshot = await this.captureFromRuntime(runtime);
             this.notice(this.formatVaultResult(result), 10000);
           } finally {
             progress.hide();
           }
         }),
       );
+      if (companionSnapshot) this.queueCompanionReconciliation(companionSnapshot);
     } catch (error) {
       this.captureErrorStatus(error);
       this.showError(error);
@@ -689,6 +748,7 @@ export class ObsidianSemanticController {
 
   async indexCurrentNote(): Promise<void> {
     if (!this.ensureEnabled() || !this.acquireOperation()) return;
+    let companionSnapshot: CompanionSnapshot | null = null;
     try {
       const snapshot = safeSettingsSnapshot(this.plugin.settings.semantic);
       const epoch = this.settingsEpoch;
@@ -728,6 +788,7 @@ export class ObsidianSemanticController {
           this.updateReadyStatus(runtime);
           await this.activateAutomaticSync();
           this.autoSyncFailureNoticed = false;
+          companionSnapshot = await this.captureFromRuntime(runtime, [file.path]);
           if (
             result.documentsUnchanged === 1 &&
             result.chunksEmbedded === 0 &&
@@ -752,6 +813,12 @@ export class ObsidianSemanticController {
           }
         }),
       );
+      if (companionSnapshot) {
+        this.companionService.enqueueIncremental(
+          { ...this.plugin.settings.companion },
+          { snapshot: companionSnapshot, deletePaths: [] },
+        );
+      }
     } catch (error) {
       this.captureErrorStatus(error);
       this.showError(error);
@@ -762,6 +829,7 @@ export class ObsidianSemanticController {
 
   async clearIndex(): Promise<void> {
     if (!this.ensureEnabled() || !this.acquireOperation()) return;
+    let companionSnapshot: CompanionSnapshot | null = null;
     try {
       const snapshot = safeSettingsSnapshot(this.plugin.settings.semantic);
       const epoch = this.settingsEpoch;
@@ -798,6 +866,7 @@ export class ObsidianSemanticController {
               return;
             }
             await runtime.clear();
+            companionSnapshot = await this.captureFromRuntime(runtime);
             this.updateReadyStatus(runtime);
             this.notice(tr("Семантический индекс очищен."));
           });
@@ -809,6 +878,7 @@ export class ObsidianSemanticController {
           }
         }
       });
+      if (companionSnapshot) this.queueCompanionReconciliation(companionSnapshot);
     } catch (error) {
       this.captureErrorStatus(error);
       this.showError(error);
@@ -819,6 +889,7 @@ export class ObsidianSemanticController {
 
   async rebuildIndex(): Promise<void> {
     if (!this.ensureEnabled() || !this.acquireOperation()) return;
+    let companionSnapshot: CompanionSnapshot | null = null;
     try {
       const fileCount = this.plugin.app.vault.getMarkdownFiles().length;
       const snapshot = safeSettingsSnapshot(this.plugin.settings.semantic);
@@ -864,12 +935,14 @@ export class ObsidianSemanticController {
             this.updateReadyStatus(runtime);
             await this.activateAutomaticSync();
             this.autoSyncFailureNoticed = false;
+            companionSnapshot = await this.captureFromRuntime(runtime);
             this.notice(this.formatVaultResult(result), 10000);
           } finally {
             progress.hide();
           }
         }),
       );
+      if (companionSnapshot) this.queueCompanionReconciliation(companionSnapshot);
     } catch (error) {
       this.captureErrorStatus(error);
       this.showError(error);
@@ -935,8 +1008,12 @@ export class ObsidianSemanticController {
     const oldWasMarkdown = isMarkdownPath(oldPath);
     const newIsMarkdown = isMarkdownTFile(file);
     if (oldWasMarkdown && newIsMarkdown) {
+      const origin = this.pendingCompanionRenames.get(oldPath) ?? oldPath;
+      this.pendingCompanionRenames.delete(oldPath);
+      this.pendingCompanionRenames.set(file.path, origin);
       this.autoSync.rename(oldPath, file.path);
     } else if (oldWasMarkdown) {
+      this.pendingCompanionRenames.delete(oldPath);
       this.autoSync.delete(oldPath);
     } else if (newIsMarkdown) {
       this.autoSync.upsert(file.path);
@@ -981,6 +1058,9 @@ export class ObsidianSemanticController {
   private async flushAutomaticSync(
     batch: SemanticAutoSyncBatch,
   ): Promise<void> {
+    const companionChange: { value: CompanionIncrementalChange | null } = {
+      value: null,
+    };
     await this.enqueueIndexMutation(() =>
       this.barrier.withShared(async () => {
         if (
@@ -1021,8 +1101,40 @@ export class ObsidianSemanticController {
         if (!shouldCommit()) return;
         this.updateReadyStatus(runtime);
         this.autoSyncFailureNoticed = false;
+        const mirror = await this.captureFromRuntime(
+          runtime,
+          batch.reconcileAll ? undefined : batch.upsertPaths,
+        );
+        if (!mirror) return;
+        if (batch.reconcileAll) {
+          this.pendingCompanionRenames.clear();
+          companionChange.value = { snapshot: mirror, deletePaths: [] };
+          return;
+        }
+        const renames: Array<{ oldPath: string; newPath: string }> = [];
+        for (const newPath of batch.upsertPaths) {
+          const oldPath = this.pendingCompanionRenames.get(newPath);
+          if (!oldPath || !batch.deletePaths.includes(oldPath)) continue;
+          renames.push({ oldPath, newPath });
+          this.pendingCompanionRenames.delete(newPath);
+        }
+        companionChange.value = {
+          snapshot: mirror,
+          deletePaths: [...batch.deletePaths],
+          renames,
+        };
       }),
     );
+    const change = companionChange.value;
+    if (!change) return;
+    if (batch.reconcileAll) {
+      this.queueCompanionReconciliation(change.snapshot);
+    } else {
+      this.companionService.enqueueIncremental(
+        { ...this.plugin.settings.companion },
+        change,
+      );
+    }
   }
 
   private handleAutomaticSyncError(error: unknown): void {
@@ -1075,6 +1187,62 @@ export class ObsidianSemanticController {
         "Semantic automatic-sync state could not be persisted safely.",
       );
     }
+  }
+
+  private async captureCompanionSnapshot(): Promise<CompanionSnapshot | null> {
+    if (
+      !this.plugin.settings.companion.enabled ||
+      !this.plugin.settings.semantic.enabled
+    ) {
+      return null;
+    }
+    return this.barrier.withShared(async () => {
+      const snapshot = safeSettingsSnapshot(this.plugin.settings.semantic);
+      const runtime = await this.runtimeForSnapshot(
+        snapshot,
+        this.settingsEpoch,
+        "search",
+      );
+      if (!runtime) return null;
+      if (!runtime.getStats().initialized) await runtime.initialize();
+      if (runtime.getStats().vectorCount <= 0) return null;
+      return runtime.captureCompanionSnapshot?.() ?? null;
+    });
+  }
+
+  private captureFromRuntime(
+    runtime: SemanticRuntime,
+    paths?: readonly string[],
+  ): Promise<CompanionSnapshot | null> {
+    if (!this.plugin.settings.companion.enabled) return Promise.resolve(null);
+    return runtime.captureCompanionSnapshot?.(paths) ?? Promise.resolve(null);
+  }
+
+  private queueCompanionReconciliation(snapshot: CompanionSnapshot): void {
+    const settings = { ...this.plugin.settings.companion };
+    if (!settings.enabled) return;
+    void this.companionService.reconcile(settings, snapshot).catch(() => {
+      // Companion is optional; status is retained by the service for the UI.
+    });
+  }
+
+  private async reconcileCompanionQuietly(): Promise<void> {
+    try {
+      const snapshot = await this.captureCompanionSnapshot();
+      if (snapshot) this.queueCompanionReconciliation(snapshot);
+    } catch {
+      // Startup reconciliation is best effort and never initializes an absent index.
+    }
+  }
+
+  private companionErrorMessage(error: unknown): string {
+    if (error instanceof CompanionClientError) {
+      if (error.code === "AUTH_REQUIRED") return tr("Companion rejected the Bearer token.");
+      if (error.code === "PROTOCOL_VERSION_MISMATCH") return tr("Companion protocol version is incompatible.");
+      if (error.code === "CONFIGURATION_ERROR") return tr("Check the Companion endpoint, HTTPS requirement, token, and timeout.");
+      if (error.code === "TIMEOUT") return tr("Companion request timed out.");
+    }
+    return tr("Companion is unavailable. Local Vault features remain active.");
   }
 
   private enqueueIndexMutation(operation: () => Promise<void>): Promise<void> {

@@ -42,6 +42,7 @@ Instead of relying only on filenames and exact keywords, it adds a semantic laye
 - 🧠 **Rediscover related notes** from the document you are already working on.
 - 🧹 **Review potential semantic duplicates** and overlapping ideas.
 - 💬 **Ask your Vault** and receive a streamed, source-backed answer from indexed notes.
+- 🛰️ **Mirror semantic state to an optional Companion** running locally or behind HTTPS on your own VPS.
 - 🗺️ **Audit your vault** for clusters, orphan notes, tags, folders, and structural issues.
 - ✍️ **Use AI inside Obsidian** for writing, transformations, flashcards, Dataview, and batch processing.
 - 🔒 **Choose local-first options** with Ollama, or connect remote AI providers when you want them.
@@ -198,7 +199,7 @@ Vault Audit AI separates local storage from provider-side processing so you can 
   .obsidian/plugins/ai-knowledge-hub/semantic-index/
   ```
 
-- The plugin does not upload stored vectors or their index metadata.
+- Stored vectors and index metadata remain local unless the optional Companion integration is explicitly enabled and synchronized.
 - When OpenRouter or another remote embedding API is selected, note chunks are sent to that endpoint during indexing and synchronization.
 - Semantic search queries are sent to the selected embedding provider for query embedding.
 - **Ask your Vault** performs one query embedding for retrieval. When the embedding provider is remote, the question is sent to that provider; retrieved source chunks are not re-embedded during Ask.
@@ -206,6 +207,10 @@ Vault Audit AI separates local storage from provider-side processing so you can 
 - **Find similar notes** and potential duplicate detection operate on vectors already present in the local index and do not make an embedding-provider request for the comparison itself.
 - Ollama allows embedding generation to remain local when connected to a local Ollama instance.
 - Automatic semantic synchronization never edits Markdown files. It reads the latest Markdown content and changes only the local vector index.
+- Companion is disabled by default. Entering an endpoint alone does not upload Vault data.
+- When Companion sync is enabled, the configured endpoint receives a stable random Vault ID, vault-relative paths, current Markdown, full chunk text, chunk/source metadata, embeddings, and semantic descriptor metadata. Localhost keeps that mirror on the same machine; a remote endpoint transmits and persists it on that server.
+- Remote Companion endpoints must use HTTPS. The Companion bearer token is independent of embedding and language-model credentials; provider API keys are never sent to Companion.
+- Companion has no telemetry, MCP, agents, note editing, or Vault write-back.
 - Writing, batch, and audit operations send the content required for the requested action to the configured language-model provider.
 - Clipboard insertion writes generated output to the system clipboard.
 
@@ -277,6 +282,8 @@ Chunk search + document representations
 
 Stable chunk hashes drive incremental deltas so unchanged chunks are reused.
 
+An optional standalone [Companion service](companion/README.md) receives versioned JSON over HTTP(S) after local semantic commits. Snapshot capture reuses the committed vectors and releases the semantic barrier before network I/O. Deterministic manifest reconciliation avoids retransmitting unchanged Markdown or embeddings and repairs events missed while either process was offline.
+
 A debounced event coordinator coalesces Markdown path changes, while startup reconciliation catches offline changes. Manual and automatic indexing share one mutation queue. Rename batches reach the vector store as one durable mutation.
 
 The vector store uses guarded temporary-file replacement, backup-aware recovery, and one shared store per semantic index path in the plugin runtime. Document discovery reads a defensive committed snapshot from that same store.
@@ -289,6 +296,8 @@ Clear and rebuild are explicit operations and do not modify source notes.
 - Ask your Vault is a one-shot question flow; it does not keep a multi-turn conversation history.
 - Automatic synchronization covers Markdown notes only; attachments, Canvas files, images, and other file types are ignored.
 - The vector store does not use an ANN or HNSW index.
+- Companion v0 is a self-hosted read-only mirror. It provides no retrieval API for end users, MCP, dashboard, accounts, TLS termination, or write-back; read-only MCP is deferred to a later stage.
+- Companion requires Node.js 24 or newer and uses Node's built-in SQLite API, which Node 24 currently labels experimental.
 - Similarity search performs a local linear scan and is intended for small and medium personal vaults.
 - Similar Notes represents a document as the normalized mean of its chunk vectors; broad or multi-topic notes may therefore receive less intuitive rankings.
 - Potential duplicate detection compares exact document-vector pairs in quadratic time and is intended for small and medium personal vaults.

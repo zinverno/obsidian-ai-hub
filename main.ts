@@ -52,6 +52,11 @@ import {
 import { NoteIndexManager } from "./noteIndex";
 import { mergeEmbeddingSettings } from "./embeddings/types";
 import type { StoredEmbeddingSettings } from "./embeddings/types";
+import {
+  isVaultId,
+  mergeCompanionSettings,
+} from "./companionSync";
+import type { StoredCompanionSettings } from "./companionSync";
 import { ObsidianSemanticController } from "./semantic";
 
 type Mode = "simple" | "selection" | "vault";
@@ -202,12 +207,15 @@ export default class AIHubPlugin extends Plugin {
     }
   }
   async loadSettings() {
-    type StoredAIHubSettings = Omit<Partial<AIHubSettings>, "semantic"> & {
+    type StoredAIHubSettings = Omit<Partial<AIHubSettings>, "semantic" | "companion"> & {
       semantic?: StoredEmbeddingSettings;
+      companion?: StoredCompanionSettings;
     };
     const data = (await this.loadData()) as StoredAIHubSettings | null;
+    const needsVaultId = !isVaultId(data?.companion?.vaultId);
     this.settings = Object.assign({}, DEFAULT_SETTINGS, data, {
       semantic: mergeEmbeddingSettings(data?.semantic),
+      companion: mergeCompanionSettings(data?.companion),
     });
 
     // Миграция: если provider не задан — определяем по baseUrl
@@ -220,6 +228,7 @@ export default class AIHubPlugin extends Plugin {
       else if (url.includes("groq.com")) this.settings.provider = "groq";
       else this.settings.provider = "custom";
     }
+    if (needsVaultId) await this.saveData(this.settings);
   }
 
   async saveSettings() {

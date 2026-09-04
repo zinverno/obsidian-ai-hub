@@ -1,5 +1,12 @@
 import type { RagContextBuilder } from "../rag/ragContextBuilder";
 import type { RagContext } from "../rag/types";
+import { stableHash } from "../chunking/hash";
+import type { ChunkingStrategy, NoteChunk } from "../chunking/types";
+import type {
+  CompanionNote,
+  CompanionSemanticDescriptor,
+  CompanionSnapshot,
+} from "../companionSync/types";
 import type {
   IndexDocumentInput,
   IndexingExecutionOptions,
@@ -34,6 +41,8 @@ export interface SemanticRuntimeComponents {
   vectorStore: VectorStore;
   source: MarkdownDocumentSource;
   ragContextBuilder: RagContextBuilder;
+  chunker?: ChunkingStrategy;
+  companionDescriptor?: CompanionSemanticDescriptor;
 }
 
 export type SemanticRuntimeInitializer =
@@ -152,6 +161,69 @@ export class LazySemanticRuntime implements SemanticRuntime {
     return this.requireDiscoveryService().findPotentialDuplicates(options);
   }
 
+  async captureCompanionSnapshot(
+    paths?: readonly string[],
+  ): Promise<CompanionSnapshot> {
+    await this.initialize();
+    const components = this.requireComponents();
+    if (!components.chunker || !components.companionDescriptor) {
+      throw new SemanticNotReadyError("Semantic mirror capture is unavailable.");
+    }
+    const chunker = components.chunker;
+    const companionDescriptor = components.companionDescriptor;
+    const snapshot = components.vectorStore.readSnapshot();
+    const indexedPaths = new Set(snapshot.metadata.map((item) => item.path));
+    const requestedPaths = paths
+      ? [...new Set(paths)].filter((path) => indexedPaths.has(path)).sort()
+      : [...indexedPaths].sort();
+    const selection = await components.source.readPaths(requestedPaths);
+    const vectorsById = new Map<string, number[]>();
+    for (let index = 0; index < snapshot.metadata.length; index++) {
+      const metadata = snapshot.metadata[index];
+      if (!metadata) continue;
+      const start = index * snapshot.dimensions;
+      vectorsById.set(
+        metadata.id,
+        Array.from(snapshot.vectors.slice(start, start + snapshot.dimensions)),
+      );
+    }
+    const metadataByPath = new Map<string, typeof snapshot.metadata>();
+    for (const metadata of snapshot.metadata) {
+      const current = metadataByPath.get(metadata.path) ?? [];
+      current.push(metadata);
+      metadataByPath.set(metadata.path, current);
+    }
+    const notes: CompanionNote[] = [];
+    for (const document of selection.documents.sort((left, right) => left.path.localeCompare(right.path))) {
+      const chunks = chunker.chunk(document);
+      const stored = metadataByPath.get(document.path) ?? [];
+      if (chunks.length !== stored.length || !chunks.every((chunk) => this.chunkMatchesStored(chunk, stored))) {
+        continue;
+      }
+      notes.push({
+        path: document.path,
+        content: document.content,
+        contentHash: stableHash(document.content),
+        metadata: {},
+        chunks: chunks.map((chunk) => ({
+          chunkId: chunk.id,
+          notePath: chunk.path,
+          ordinal: chunk.ordinal,
+          headingPath: [...chunk.headingPath],
+          text: chunk.text,
+          contentHash: chunk.contentHash,
+          source: { ...chunk.source },
+          embedding: [...(vectorsById.get(chunk.id) ?? [])],
+        })),
+      });
+    }
+    return {
+      generation: snapshot.generation,
+      descriptor: { ...companionDescriptor },
+      notes,
+    };
+  }
+
   async clear(): Promise<void> {
     await this.initialize();
     await this.requireComponents().vectorStore.clear();
@@ -222,5 +294,24 @@ export class LazySemanticRuntime implements SemanticRuntime {
   private requireDiscoveryService(): SemanticDiscoveryService {
     if (!this.discoveryService) throw new SemanticNotReadyError();
     return this.discoveryService;
+  }
+
+  private chunkMatchesStored(
+    chunk: NoteChunk,
+    stored: ReturnType<VectorStore["listMetadata"]>,
+  ): boolean {
+    const metadata = stored.find((item) => item.id === chunk.id);
+    return Boolean(
+      metadata &&
+      metadata.path === chunk.path &&
+      metadata.ordinal === chunk.ordinal &&
+      metadata.contentHash === chunk.contentHash &&
+      metadata.headingPath.length === chunk.headingPath.length &&
+      metadata.headingPath.every((heading, index) => heading === chunk.headingPath[index]) &&
+      metadata.source.startOffset === chunk.source.startOffset &&
+      metadata.source.endOffset === chunk.source.endOffset &&
+      metadata.source.startLine === chunk.source.startLine &&
+      metadata.source.endLine === chunk.source.endLine
+    );
   }
 }

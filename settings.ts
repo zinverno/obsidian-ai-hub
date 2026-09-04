@@ -27,6 +27,11 @@ import {
   semanticControlDisabled,
   SemanticSettingsActionRunner,
 } from "./semantic/semanticSettingsActionRunner";
+import {
+  DEFAULT_COMPANION_SETTINGS,
+  isLocalCompanionEndpoint,
+} from "./companionSync";
+import type { CompanionSettings } from "./companionSync";
 
 export type InsertionType =
   | "end"
@@ -69,6 +74,8 @@ export interface AIHubSettings {
   semantic: EmbeddingSettings;
   /** Clear keeps automatic sync suspended until a later explicit index run. */
   semanticAutoSyncSuspended: boolean;
+  /** Optional read-only network mirror used by the standalone Companion. */
+  companion: CompanionSettings;
 }
 
 export const DEFAULT_SETTINGS: AIHubSettings = {
@@ -94,6 +101,7 @@ export const DEFAULT_SETTINGS: AIHubSettings = {
   },
   semantic: { ...DEFAULT_EMBEDDING_SETTINGS },
   semanticAutoSyncSuspended: false,
+  companion: { ...DEFAULT_COMPANION_SETTINGS },
 };
 
 // ─────────────────────────────────────────────────────────────────────
@@ -170,6 +178,11 @@ export class AIHubSettingTab extends PluginSettingTab {
     // ── Секция: embeddings ───────────────────────────────────────────
     this.addHeading(tr("Embeddings"), "binary");
     this.renderEmbeddingsSection(save);
+
+    containerEl.createEl("hr", { cls: "ai-hub-settings-separator" });
+
+    this.addHeading(tr("Companion"), "server");
+    this.renderCompanionSection(save);
 
     containerEl.createEl("hr", { cls: "ai-hub-settings-separator" });
 
@@ -914,6 +927,90 @@ export class AIHubSettingTab extends PluginSettingTab {
         ),
       );
     this.addIcon(actions, "search");
+  }
+
+  private renderCompanionSection(save: () => Promise<void>): void {
+    const companion = this.plugin.settings.companion;
+    const controller = this.plugin.getSemanticController();
+
+    this.addIcon(
+      new Setting(this.containerEl)
+        .setName(tr("Включить Companion"))
+        .setDesc(tr("Опционально передаёт read-only mirror текущего semantic index настроенному Companion endpoint. Первый sync запускается явно."))
+        .addToggle((toggle) => toggle.setValue(companion.enabled).onChange(async (value) => {
+          companion.enabled = value;
+          controller.notifyCompanionSettingsChanged();
+          await save();
+          this.display();
+        })),
+      "power",
+    );
+
+    this.addIcon(
+      new Setting(this.containerEl)
+        .setName(tr("Companion endpoint"))
+        .setDesc(tr("Локально: http://127.0.0.1:27124. Remote endpoint должен использовать HTTPS."))
+        .addText((text) => text
+          .setPlaceholder(DEFAULT_COMPANION_SETTINGS.endpoint)
+          .setValue(companion.endpoint)
+          .onChange(async (value) => {
+            companion.endpoint = value.trim();
+            controller.notifyCompanionSettingsChanged();
+            await save();
+          })),
+      "link",
+    );
+
+    this.addIcon(
+      new Setting(this.containerEl)
+        .setName(tr("Companion token"))
+        .setDesc(tr("Отдельный Bearer token Companion. Хранится локально в данных плагина и никогда не отправляется AI-провайдерам."))
+        .addText((text) => {
+          text.inputEl.type = "password";
+          text.inputEl.setAttribute("autocomplete", "off");
+          return text.setPlaceholder("••••••••••••").setValue(companion.token).onChange(async (value) => {
+            companion.token = value.trim();
+            controller.notifyCompanionSettingsChanged();
+            await save();
+          });
+        }),
+      "key",
+    );
+
+    if (companion.endpoint && !isLocalCompanionEndpoint(companion.endpoint)) {
+      const warning = this.containerEl.createDiv({ cls: "ai-hub-info-card" });
+      warning.setText(tr("Remote Companion получает vault-relative пути, Markdown, chunk text, metadata и embeddings. Используйте только HTTPS и доверенный сервер."));
+    }
+
+    const state = controller.getCompanionStatus();
+    const labels = {
+      disabled: tr("Выключен"),
+      idle: tr("Ожидает sync"),
+      syncing: tr("Синхронизация..."),
+      ready: tr("Готов"),
+      error: tr("Ошибка"),
+    };
+    const row = new Setting(this.containerEl)
+      .setName(tr("Companion connection"))
+      .setDesc(`${tr("Статус: {status}", { status: labels[state.kind] })}${state.code ? ` (${state.code})` : ""}`)
+      .addButton((button) => button
+        .setButtonText(tr("Проверить соединение"))
+        .setIcon("plug-zap")
+        .onClick(() => {
+          void controller.testCompanionConnection().finally(() => {
+            if (this.containerEl.isConnected) this.display();
+          });
+        }))
+      .addButton((button) => button
+        .setButtonText(tr("Sync now"))
+        .setIcon("refresh-cw")
+        .setDisabled(!companion.enabled)
+        .onClick(() => {
+          void controller.syncCompanionNow().finally(() => {
+            if (this.containerEl.isConnected) this.display();
+          });
+        }));
+    this.addIcon(row, "server");
   }
 
   private async runSemanticControlAction(

@@ -65,6 +65,9 @@ import {
 } from "./semanticStorageMaintenance";
 import { SemanticStoreRegistry } from "./semanticStoreRegistry";
 import type { SemanticRuntime } from "./types";
+import { AsyncReadWriteBarrier } from "./asyncReadWriteBarrier";
+import type { CompanionSyncPort } from "../companionSync";
+import type { SemanticControllerDependencies } from "./obsidianSemanticController";
 
 const BASE_PATH = semanticIndexBasePath(".obsidian", "ai-knowledge-hub");
 
@@ -297,6 +300,7 @@ function createHarness(
   initialSettings = semantic(),
   adapter = new MemoryDataAdapter(),
   autoSyncSuspended = false,
+  dependencyOverrides: SemanticControllerDependencies = {},
 ) {
   const registry = new SemanticStoreRegistry();
   const notices: string[] = [];
@@ -345,6 +349,13 @@ function createHarness(
   const pluginSettings = {
     semantic: initialSettings,
     semanticAutoSyncSuspended: autoSyncSuspended,
+    companion: {
+      enabled: false,
+      endpoint: "http://127.0.0.1:27124",
+      token: "",
+      timeoutMs: 5000,
+      vaultId: "11111111-1111-4111-8111-111111111111",
+    },
   };
   const plugin = {
     app,
@@ -374,6 +385,7 @@ function createHarness(
     resetStorage,
     storeRegistry: registry,
     autoSyncDebounceMs: 10,
+    ...dependencyOverrides,
   });
   return {
     adapter,
@@ -1677,5 +1689,123 @@ describe("automatic semantic index synchronization", () => {
     expect(harness.registry.peek(BASE_PATH)?.store.getStats().generation).toBe(
       generation,
     );
+  });
+
+  it("a slow Companion never blocks AutoSync, search, discovery, Clear, or Rebuild", async () => {
+    const slow = manualGate();
+    const companion: CompanionSyncPort = {
+      getStatus: vi.fn(() => ({ kind: "syncing" as const })),
+      testConnection: vi.fn(async () => undefined),
+      reconcile: vi.fn(async () => { await slow.wait; }),
+      enqueueIncremental: vi.fn(),
+      dispose: vi.fn(async () => undefined),
+    };
+    const harness = createHarness(semantic(), new MemoryDataAdapter(), false, {
+      companionService: companion,
+    });
+    harness.plugin.settings.companion.enabled = true;
+    harness.plugin.settings.companion.token = "companion-secret";
+    harness.registerAutomaticSync();
+
+    await harness.controller.indexVault();
+    expect(companion.reconcile).toHaveBeenCalledOnce();
+    await expect(harness.controller.search("alpha")).resolves.toHaveLength(1);
+    await expect(harness.controller.findSimilarNotes("Alpha.md")).resolves.toEqual([]);
+    await expect(harness.controller.findPotentialDuplicates()).resolves.toEqual([]);
+
+    harness.modifyFile("Alpha.md", "# Alpha\n\nbeta while companion is slow");
+    await drainAutomaticSync();
+    expect(companion.enqueueIncremental).toHaveBeenCalledOnce();
+    await expect(harness.controller.search("beta")).resolves.toHaveLength(1);
+
+    await expect(harness.controller.clearIndex()).resolves.toBeUndefined();
+    await expect(harness.controller.rebuildIndex()).resolves.toBeUndefined();
+    expect(companion.reconcile).toHaveBeenCalledTimes(3);
+    slow.release();
+  });
+
+  it("starts every Companion network handoff after releasing the semantic barrier", async () => {
+    class TrackingBarrier extends AsyncReadWriteBarrier {
+      insideShared = false;
+
+      override withShared<T>(operation: () => Promise<T>): Promise<T> {
+        return super.withShared(async () => {
+          this.insideShared = true;
+          try {
+            return await operation();
+          } finally {
+            this.insideShared = false;
+          }
+        });
+      }
+    }
+    const barrier = new TrackingBarrier();
+    const observed: boolean[] = [];
+    const companion: CompanionSyncPort = {
+      getStatus: vi.fn(() => ({ kind: "idle" as const })),
+      testConnection: vi.fn(async () => undefined),
+      reconcile: vi.fn(async () => { observed.push(barrier.insideShared); }),
+      enqueueIncremental: vi.fn(() => { observed.push(barrier.insideShared); }),
+      dispose: vi.fn(async () => undefined),
+    };
+    const harness = createHarness(semantic(), new MemoryDataAdapter(), false, {
+      barrier,
+      companionService: companion,
+    });
+    harness.plugin.settings.companion.enabled = true;
+    harness.registerAutomaticSync();
+
+    await harness.controller.indexVault();
+    harness.modifyFile("Alpha.md", "# Alpha\n\ngamma after local commit");
+    await drainAutomaticSync();
+
+    expect(observed).toEqual([false, false]);
+  });
+
+  it("quietly reconciles Companion on startup only when a usable index already exists", async () => {
+    const first = createHarness();
+    await first.controller.indexVault();
+    const companion: CompanionSyncPort = {
+      getStatus: vi.fn(() => ({ kind: "idle" as const })),
+      testConnection: vi.fn(async () => undefined),
+      reconcile: vi.fn(async () => undefined),
+      enqueueIncremental: vi.fn(),
+      dispose: vi.fn(async () => undefined),
+    };
+    const restarted = createHarness(semantic(), first.adapter, false, {
+      companionService: companion,
+    });
+    restarted.plugin.settings.companion.enabled = true;
+    embeddingCalls = [];
+    restarted.registerAutomaticSync();
+    restarted.fireLayoutReady();
+    await vi.advanceTimersByTimeAsync(20);
+    await flushMicrotasks();
+
+    expect(companion.reconcile).toHaveBeenCalled();
+    expect(embeddingCalls).toEqual([]);
+  });
+
+  it("does not build an absent semantic index merely because Companion is enabled", async () => {
+    const companion: CompanionSyncPort = {
+      getStatus: vi.fn(() => ({ kind: "idle" as const })),
+      testConnection: vi.fn(async () => undefined),
+      reconcile: vi.fn(async () => undefined),
+      enqueueIncremental: vi.fn(),
+      dispose: vi.fn(async () => undefined),
+    };
+    const harness = createHarness(semantic(), new MemoryDataAdapter(), false, {
+      companionService: companion,
+    });
+    harness.plugin.settings.companion.enabled = true;
+    embeddingCalls = [];
+    harness.registerAutomaticSync();
+    harness.fireLayoutReady();
+    await vi.advanceTimersByTimeAsync(20);
+    await flushMicrotasks();
+
+    expect(companion.reconcile).not.toHaveBeenCalled();
+    expect(embeddingCalls).toEqual([]);
+    expect(harness.registry.size).toBe(0);
   });
 });

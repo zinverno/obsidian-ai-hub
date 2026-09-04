@@ -49,6 +49,13 @@ function settings(overrides: Partial<AIHubSettings> = {}): AIHubSettings {
     },
     semanticAutoSyncSuspended: false,
     ...overrides,
+    companion: overrides.companion ?? {
+      enabled: false,
+      endpoint: "http://127.0.0.1:27124",
+      token: "",
+      timeoutMs: 5000,
+      vaultId: "11111111-1111-4111-8111-111111111111",
+    },
   };
 }
 
