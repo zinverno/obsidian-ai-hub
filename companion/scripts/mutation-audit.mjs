@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import process from "node:process";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const scratch = await mkdtemp(join(tmpdir(), "vault-stage9-mutations-"));
+const scratch = await mkdtemp(join(tmpdir(), "vault-search-mutations-"));
 const cases = [
   {
     id: "A", name: "MCP token authenticates sync", file: "src/server.ts",
@@ -22,7 +22,7 @@ const cases = [
     to: "inputSchema: z.strictObject({ vaultId: z.string().optional() }),",
     extra: [
       '() => executeTool(logger, "vault_status", () => service.vaultStatus()),',
-      '(input) => executeTool(logger, "vault_status", () => new VaultMcpService(storage, input.vaultId ?? config.vaultId, new SqliteSemanticSearch(storage, provider)).vaultStatus()),',
+      '(input) => executeTool(logger, "vault_status", () => new VaultMcpService(storage, input.vaultId ?? config.vaultId, new SemanticSearchService(storage, provider)).vaultStatus()),',
     ],
     test: "mcpProtocol", pattern: "rejects caller-selected vault scope",
   },
@@ -51,11 +51,11 @@ const cases = [
   },
   {
     id: "G", name: "raw vectors returned", file: "src/mcp/semanticSearch.ts",
-    from: "path: record.path,", to: "embedding: Array.from(record.vector),\n      path: record.path,",
+    from: "path: record.path,", to: "embedding: [1, 0, 0],\n      path: record.path,",
     test: "mcpSemanticSearch", pattern: "keeps only top K and returns no raw vectors",
   },
   {
-    id: "H", name: "result cap removed", file: "src/mcp/semanticSearch.ts",
+    id: "H", name: "result cap removed", file: "src/search/sqliteVectorBackend.ts",
     from: "if (ranked.length > limit) ranked.length = limit;", to: "// mutation: unbounded results",
     test: "mcpSemanticSearch", pattern: "keeps only top K and returns no raw vectors",
   },
@@ -70,6 +70,65 @@ const cases = [
     from: 'if (reportedModel === descriptor.model) return true;',
     to: 'if (descriptor.providerId === "openrouter" || reportedModel === descriptor.model) return true;',
     test: "queryEmbedding", pattern: "rejects a different OpenRouter response model despite identical dimensions",
+  },
+  {
+    id: "10-A", name: "Qdrant error propagates instead of SQLite fallback", file: "src/mcp/semanticSearch.ts",
+    from: "this.accelerator.invalidate();", to: 'throw new Error("QDRANT_UNAVAILABLE");',
+    test: "qdrantBackend", pattern: "Qdrant search failure falls back using exactly one query embedding",
+  },
+  {
+    id: "10-B", name: "fallback embeds query twice", file: "src/mcp/semanticSearch.ts",
+    from: "this.accelerator.invalidate();", to: "this.accelerator.invalidate(); await this.provider.embedQuery(descriptor, query);",
+    test: "qdrantBackend", pattern: "Qdrant search failure falls back using exactly one query embedding",
+  },
+  {
+    id: "10-C", name: "stale generation trusted as READY", file: "src/search/vectorBackend.ts",
+    from: "left.generation === right.generation &&", to: "",
+    test: "qdrantBackend", pattern: "requires exact generation, revision, vault and semantic space",
+  },
+  {
+    id: "10-D", name: "descriptor mismatch accepted", file: "src/search/vectorBackend.ts",
+    from: "&& sameSpace(left.descriptor, right.descriptor)", to: "",
+    test: "qdrantBackend", pattern: "requires exact generation, revision, vault and semantic space",
+  },
+  {
+    id: "10-E", name: "derived update notified before authoritative COMMIT", file: "src/storage/sqliteCompanionStorage.ts",
+    from: 'database.exec("COMMIT");',
+    to: 'this.publishCommit({ vaultId, generation: batch.generation, previousRevision: current?.revision ?? 0, revision, replaceVault: batch.replaceVault ?? false, paths }); database.exec("COMMIT");',
+    test: "qdrantBackend", pattern: "independent SQLite reader sees COMMIT before observers",
+  },
+  {
+    id: "10-F", name: "secondary failure breaks successful SQLite sync", file: "src/storage/sqliteCompanionStorage.ts",
+    from: "catch { /* Secondary work is isolated. */ }", to: "catch (error) { throw error; }",
+    test: "qdrantBackend", pattern: "observer failure cannot make a successful SQLite sync fail",
+  },
+  {
+    id: "10-G", name: "old collection queried after descriptor replacement", file: "src/search/qdrantBackend.ts",
+    from: 'this.pending = this.state === "READY"', to: 'if (notice.replaceVault) return; this.pending = this.state === "READY"',
+    extra: ["sameSnapshot(this.ready.snapshot, snapshot)", "snapshot.vaultId === this.vaultId"],
+    test: "qdrantBackend", pattern: "descriptor replacement never queries old space",
+  },
+  {
+    id: "10-H", name: "Qdrant key leaked through diagnostic status", file: "src/search/qdrantBackend.ts",
+    from: "lastErrorCode: this.lastErrorCode,", to: "lastErrorCode: this.config.apiKey,",
+    test: "qdrantBackend", pattern: "safe diagnostic status never includes Qdrant key",
+  },
+  {
+    id: "10-I", name: "full Markdown in point payload", file: "src/search/qdrantIndex.ts",
+    from: "chunkId: record.chunkId, vaultId: spec.vaultId,", to: 'markdown: "# PRIVATE MARKDOWN", chunkId: record.chunkId, vaultId: spec.vaultId,',
+    test: "qdrantIndex", pattern: "point payload has only retrieval identity and never full Markdown",
+  },
+  {
+    id: "10-J", name: "partial build published READY", file: "src/search/qdrantBackend.ts",
+    from: 'this.state = "BUILDING";',
+    to: 'this.state = "READY"; this.ready = { snapshot, spec: indexSpec(this.config.collectionPrefix, snapshot, "partial") };',
+    test: "qdrantBackend", pattern: "BUILDING never publishes a partial index",
+  },
+  {
+    id: "10-K", name: "missing authoritative chunk returned as derived content", file: "src/mcp/semanticSearch.ts",
+    from: "const record = chunks.get(chunkId);",
+    to: 'const record = chunks.get(chunkId) ?? { chunkId, path: "stale.md", ordinal: 0, headingPath: [], source: { startOffset: 0, endOffset: 0, startLine: 0, endLine: 0 }, text: "stale derived text" };',
+    test: "qdrantBackend", pattern: "missing SQLite hydration discards all Qdrant candidates",
   },
 ];
 
