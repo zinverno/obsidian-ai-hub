@@ -157,7 +157,7 @@ The plugin never transmits its embedding or language-model API keys. Provision a
 
 Each non-empty search calls `QueryEmbeddingProvider.embedQuery` **once**, sending only `[query]`. It never sends stored note/chunk text for embedding and never probes dimensions with a second request. Empty mirrors/chunk sets make zero calls. The other four tools make zero embedding calls. A missing/incompatible provider or invalid response produces a clean `SEMANTIC_SEARCH_UNAVAILABLE` tool error while reading/listing remains available.
 
-Search validates the canonical descriptor identity, supported provider, dimensions, finite Float32 values, and nonzero query norm. If the provider reports a model, it must match exactly, with one narrow OpenRouter exception: remove at most one leading `private/openrouter/` from the reported name and allow a terminal `:free` on the requested name to be absent in the response; the underlying identifier must still match exactly. No other namespaces, suffixes, case changes, or different models are accepted. Requests and the persisted descriptor/embedding-space ID retain the original configured model; no reindex is needed. Stored vectors must be unit-normalized within `1e-4`. The query is normalized into Float32 and dot products are clamped to `[-1, 1]`, matching the plugin's cosine semantics. Scores sort descending, with chunk ID ascending as the stable tie-break. The SQLite scan retains only top K vectors and reads winner text afterwards. A descriptor/generation change during the query request rejects the search rather than comparing incompatible spaces. No index is rebuilt. There is no ANN or second vector database; scanning is linear and intended for small/medium personal Vaults.
+Search validates the canonical descriptor identity, supported provider, dimensions, finite Float32 values, and nonzero query norm. If the provider reports a model, it must match exactly, with one narrow OpenRouter exception: remove at most one leading `private/openrouter/` from the reported name and allow a terminal `:free` on the requested name to be absent in the response; the underlying identifier must still match exactly. No other namespaces, suffixes, case changes, or different models are accepted. Requests and the persisted descriptor/embedding-space ID retain the original configured model; no reindex is needed. Stored vectors must be unit-normalized within `1e-4`. The query is normalized into Float32 and dot products are clamped to `[-1, 1]`, matching the plugin's cosine semantics. Scores sort descending, with chunk ID ascending as the stable tie-break. The SQLite scan retains only top K vectors and reads winner text afterwards. A descriptor/generation change during the query request rejects the search rather than comparing incompatible spaces. With Qdrant disabled, retrieval uses the permanent SQLite linear scan. Optional Qdrant acceleration uses the same query vector and hydrates every winner from SQLite; see below.
 
 ### Client configuration
 
@@ -306,6 +306,81 @@ Each real chunk also carries `chunkId`, `notePath`, `ordinal`, `headingPath`, fu
 ```
 
 Requests are bounded to 16 MiB, 100 operations per batch, 4 MiB per note, and 10,000 chunks per note.
+
+## Optional Qdrant acceleration
+
+Qdrant is **optional, disabled by default, and a derived, rebuildable vector-search index**. SQLite remains the authoritative persistent mirror for Markdown, note/chunk identity, text, metadata, stored vectors, semantic descriptor, generation and synchronization. The plugin only talks to Companion and has no Qdrant settings. The MCP tools and `search_vault({ query, limit? })` inputs are unchanged; backend selection is server policy.
+
+Companion uses the official [`@qdrant/js-client-rest`](https://github.com/qdrant/qdrant-js) client, pinned to **1.19.0**, through a narrow adapter. Use Qdrant **1.19.x** with collection metadata support. An incompatible server or collection leaves retrieval on SQLite. All dependencies live in `companion/`; the same build runs locally or on a Linux VPS. Docker is not a Companion runtime requirement.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `QDRANT_ENABLED` | `false` | Enable the derived index for the one configured `MCP_VAULT_ID`. |
+| `QDRANT_URL` | `http://127.0.0.1:6333` | Qdrant HTTP(S) endpoint, optionally with a reverse-proxy path. URL credentials, query strings and fragments are rejected. |
+| `QDRANT_API_KEY` | empty | Server-side Qdrant credential. Keep in a protected environment file; never in plugin settings. |
+| `QDRANT_TIMEOUT_MS` | `5000` | Per-request timeout, 100–120000 ms. Requests are not retried. |
+| `QDRANT_COLLECTION_PREFIX` | `vault_audit` | 1–32 ASCII letters, digits or underscores. Use separate prefixes for separate Companion deployments. |
+| `QDRANT_ALLOW_INSECURE_REMOTE_HTTP` | `false` | Explicit opt-in for plaintext HTTP beyond loopback, including private IPs. |
+
+`MCP_VAULT_ID` must be set when Qdrant is enabled, even if `/mcp` is disabled. It is the same stable UUID used by the plugin's existing Companion mirror. Other mirrored Vaults remain in SQLite. Restart Companion after configuration changes.
+
+A local configuration, in addition to the normal Companion/MCP settings:
+
+```dotenv
+MCP_VAULT_ID=11111111-1111-4111-8111-111111111111
+QDRANT_ENABLED=true
+QDRANT_URL=http://127.0.0.1:6333
+QDRANT_API_KEY=
+QDRANT_TIMEOUT_MS=5000
+QDRANT_COLLECTION_PREFIX=vault_audit
+QDRANT_ALLOW_INSECURE_REMOTE_HTTP=false
+```
+
+Run Qdrant separately using its native binary or your existing service manager. An optional local development container can be started with:
+
+```sh
+docker run --rm --name vault-qdrant -p 127.0.0.1:6333:6333 qdrant/qdrant:v1.19.1
+```
+
+The container's vector data is disposable; Companion rebuilds it from SQLite. Keep the authoritative Companion `DATA_DIR` persistent and backed up.
+
+For a VPS with a protected HTTPS endpoint reachable on private networking:
+
+```dotenv
+MCP_VAULT_ID=11111111-1111-4111-8111-111111111111
+QDRANT_ENABLED=true
+QDRANT_URL=https://qdrant.internal.example
+QDRANT_API_KEY=replace-with-a-private-server-side-key
+QDRANT_TIMEOUT_MS=5000
+QDRANT_COLLECTION_PREFIX=vault_audit_vps
+QDRANT_ALLOW_INSECURE_REMOTE_HTTP=false
+```
+
+Prefer HTTPS and firewall/private-network restrictions in production. Loopback plaintext is accepted. If an isolated private network deliberately uses `http://10.0.0.12:6333`, set `QDRANT_ALLOW_INSECURE_REMOTE_HTTP=true`; that explicitly permits transmitting the key in plaintext on that network. HTTP redirects are refused for every SDK operation, including HTTPS redirects, so the key cannot follow a redirect to another endpoint. Configure the final URL directly. Keys never enter SQLite, MCP output, public health, authenticated diagnostic status or upstream error text. Adapter errors retain only fixed error codes.
+
+### Readiness, rebuild and recovery
+
+HTTP and MCP start after normal SQLite initialization. Qdrant reconciliation starts independently in the background. Startup does not wait for Qdrant, and no Obsidian resync/reindex is needed when Qdrant is enabled later or recovers from an outage.
+
+The states are `DISABLED`, `BUILDING`, `READY`, `STALE` and `ERROR`. Search may use Qdrant only for an exact match of Vault, generation, internal SQLite commit revision and complete semantic descriptor (provider, model, endpoint identity, dimensions, normalized flag and `embeddingSpaceId`). The internal revision advances on every committed sync batch, including multiple batches of the same generation, without changing the public sync protocol. Failed transactions do not advance it.
+
+On each Companion process start, existing Qdrant data is distrusted and rebuilt. Rebuild reads stored SQLite vectors by chunk-ID keyset pages of at most 128 records, validates their dimensions and normalization, and uploads at most 128 points per request. It never reads Markdown for embedding, rechunks notes, changes stored vectors or calls an embedding provider. SQLite cursors are not held across network waits. The build is published `READY` only after completed writes, compatible collection metadata, exact total/current point counts, and another check of the unchanged SQLite snapshot. A unique build stamp detects older restored Qdrant snapshots and late writes from failed requests. Partial or raced builds cannot become current.
+
+Collections use `<prefix>_<128-bit SHA-256 vault hash>_<128-bit SHA-256 space hash>`, with a full SHA-256 ownership marker in collection metadata. Names contain no note paths, absolute Vault paths or Markdown. Point IDs are deterministic UUIDv8 values derived from SHA-256 of the JSON pair `[vaultId, chunkId]`. A rebuild preserves those IDs. Each point has its vector plus `chunkId`, `vaultId`, `embeddingSpaceId`, generation, revision, build stamp and a hashed note path used for deletes. Full Markdown, chunk text and source metadata remain in SQLite.
+
+Every SQLite sync transaction commits first. Its post-commit notification invalidates readiness immediately and queues secondary work. A single pending compatible change deletes the affected note identities in Qdrant, uploads their current SQLite vectors and updates the generation/revision/build stamps of the retained points. This covers UPSERT, DELETE and RENAME: Stage 8 rename deletes both old/destination records and inserts the new note. Several pending commits coalesce into one complete rebuild. Descriptor replacement selects a new collection immediately; old-space collections are never searched for the replacement descriptor.
+
+A Qdrant failure cannot roll back SQLite or turn a successfully committed sync response into a failure. Later reconciliation repairs the derived index from the mirror. One worker handles updates with no unbounded failure queue. Failed passes use capped exponential backoff (2–30 seconds); healthy indexes are checked every 30 seconds. Each pass is a finite sequence of bounded requests; periodic maintenance continues while Companion runs. Search also checks collection compatibility and exact total/current counts before querying, detecting missing, empty, stale or partially deleted indexes without waiting for maintenance. Multiple external round trips can add up to several per-request timeouts before fallback.
+
+One Companion process must own each prefix/Vault/space collection. Do not share those collections with another writer or modify their payloads/vectors manually. The ownership marker prevents clearing an unrelated collection, but is not a distributed writer lock. Old owned collections are retained after descriptor replacement. Companion does not delete collections automatically; operators may conservatively remove unused collections after checking their ownership marker and ensuring no Companion uses them. Back up SQLite; derived collections can be recreated.
+
+### Retrieval and operator status
+
+Each search creates at most **one query embedding**. Qdrant returns only candidate chunk IDs and cosine scores. Companion sorts by score descending then chunk ID ascending and reads all winning text, paths, headings and source ranges from current SQLite. Qdrant cosine scores remain in `[-1, 1]`; only Float32 roundoff up to `1e-6` outside that interval is clamped. ANN retrieval may differ from a full scan on larger datasets. Candidate retrieval is bounded (at most 257 points); if the window cuts a score tie, SQLite resolves the tie for deterministic results.
+
+Disabled, unavailable, rebuilding, stale, incompatible, malformed, timed-out or incompletely hydrated Qdrant results fall back to the permanent SQLite backend using the **same normalized query vector**. Suspicious partial results are discarded in full. A same-space commit during Qdrant retrieval can use the current SQLite snapshot; a descriptor change rejects the old query vector. No fallback re-embeds the query or stored notes. The other four read-only MCP tools always read SQLite.
+
+`GET /v1/status`, authenticated with `COMPANION_TOKEN` and `X-Companion-Protocol-Version: 1`, adds a `qdrant` object. When enabled it reports state, connectivity from the last check, collection, Vault/space identity, indexed/current generation and revision, `lastErrorCode`, `lastSuccessfulSyncAt`, and `lastSearchBackend` (`sqlite` or `qdrant`). The latter describes the most recently completed semantic search, not a caller-selectable option. A retained indexed generation/collection after failure is diagnostic history, not permission to search it. Disabled status reports `enabled: false` and `state: DISABLED`. Public `/health` stays limited to service health and protocol version, and the MCP `vault_status` output is unchanged.
 
 ## Reconciliation and vector-space rules
 
