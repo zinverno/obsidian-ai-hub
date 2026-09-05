@@ -65,6 +65,12 @@ const cases = [
     to: '(input) => executeTool(logger, "search_vault", async () => { logger.info(input.query, { token: config.token }); const result = await service.searchVault(input); logger.info(JSON.stringify(result)); return result; }),',
     test: "mcpProtocol", pattern: "lets every tool work through the SDK",
   },
+  {
+    id: "J", name: "any OpenRouter response model accepted", file: "src/mcp/queryEmbedding.ts",
+    from: 'if (reportedModel === descriptor.model) return true;',
+    to: 'if (descriptor.providerId === "openrouter" || reportedModel === descriptor.model) return true;',
+    test: "queryEmbedding", pattern: "rejects a different OpenRouter response model despite identical dimensions",
+  },
 ];
 
 function run(test, pattern) {
@@ -101,7 +107,7 @@ try {
     const restored = run(mutation.test, mutation.pattern);
     assert.equal(restored.status, 0, restored.stdout + restored.stderr);
   }
-  process.stdout.write("9/9 mutations killed; every restored test passed.\n");
+  process.stdout.write(`${cases.length}/${cases.length} mutations killed; every restored test passed.\n`);
 } finally {
   await rm(scratch, { recursive: true, force: true });
 }

@@ -25,6 +25,19 @@ function embeddingEndpoint(baseUrl: string, suffix: string): string {
   return url.toString();
 }
 
+function reportedModelMatches(descriptor: SemanticDescriptor, reportedModel: unknown): boolean {
+  if (reportedModel === descriptor.model) return true;
+  if (descriptor.providerId !== "openrouter" || typeof reportedModel !== "string") return false;
+
+  // OpenRouter can report its internal namespace and omit the :free routing
+  // suffix. Only the response name is interpreted here; requests and persisted
+  // embedding-space identities always retain the original descriptor model.
+  const prefix = "private/openrouter/";
+  const reported = reportedModel.startsWith(prefix) ? reportedModel.slice(prefix.length) : reportedModel;
+  if (reported === descriptor.model) return true;
+  return descriptor.model.endsWith(":free") && reported === descriptor.model.slice(0, -":free".length);
+}
+
 function vectorFromPayload(payload: unknown, providerId: string): Float32Array {
   if (!payload || typeof payload !== "object") throw semanticSearchUnavailable();
   let raw: unknown;
@@ -108,7 +121,7 @@ export class DescriptorQueryEmbeddingProvider implements QueryEmbeddingProvider 
     } catch {
       throw semanticSearchUnavailable();
     }
-    if (payload && typeof payload === "object" && "model" in payload && payload.model !== descriptor.model) {
+    if (payload && typeof payload === "object" && "model" in payload && !reportedModelMatches(descriptor, payload.model)) {
       throw semanticSearchUnavailable();
     }
     return vectorFromPayload(payload, descriptor.providerId);

@@ -4,6 +4,10 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SqliteSemanticSearch } from "../src/mcp/semanticSearch.js";
 import type { QueryEmbeddingProvider } from "../src/mcp/queryEmbedding.js";
+import { DescriptorQueryEmbeddingProvider, type QueryEmbeddingFetch } from "../src/mcp/queryEmbedding.js";
+import { buildDescriptorEmbeddingSpaceId } from "../src/mcp/descriptor.js";
+import { VaultMcpService } from "../src/mcp/service.js";
+import { createMcpReadView } from "../src/storage/mcpReadStorage.js";
 import { SqliteCompanionStorage } from "../src/storage/sqliteCompanionStorage.js";
 import { descriptor, note, upsertBatch, VAULT_A } from "./fixtures.js";
 
@@ -109,6 +113,44 @@ describe("SQLite MCP semantic retrieval", () => {
     await new SqliteSemanticSearch(storage, queryProvider).search(VAULT_A, "one call", 2);
     expect(queryProvider.calls).toBe(1);
     expect(embed).toHaveBeenCalledExactlyOnceWith(descriptor(), "one call");
+  });
+
+  it("uses one OpenRouter HTTP query with the original model and leaves the mirrored vector space unchanged", async () => {
+    const value = descriptor({
+      providerId: "openrouter", model: "nvidia/nemotron-3-embed-1b:free",
+      baseUrl: "https://openrouter.ai/api/v1", dimensions: 2048,
+    });
+    value.embeddingSpaceId = buildDescriptorEmbeddingSpaceId(value);
+    const vector = Array<number>(2048).fill(0);
+    vector[0] = 1;
+    await storage.applyBatch(VAULT_A, upsertBatch(1, [
+      note("A.md", "stored note A, never sent for embedding", vector),
+      note("B.md", "stored note B, never sent for embedding", vector),
+    ], { descriptor: value }));
+    const before = await storage.readVault(VAULT_A);
+    const mutate = vi.spyOn(storage, "applyBatch");
+    const performFetch = vi.fn<QueryEmbeddingFetch>(async () => new Response(JSON.stringify({
+      model: "private/openrouter/nvidia/nemotron-3-embed-1b",
+      data: [{ index: 0, embedding: vector }],
+    }), { status: 200 }));
+    const adapter = new DescriptorQueryEmbeddingProvider({ apiKey: "provider-secret", timeoutMs: 1000, fetch: performFetch });
+    const readStorage = createMcpReadView(storage);
+    const service = new VaultMcpService(readStorage, VAULT_A, new SqliteSemanticSearch(readStorage, adapter));
+
+    const { results } = await service.searchVault({ query: "общая память для AI", limit: 5 });
+    expect(results.map((result) => result.path)).toEqual(["A.md", "B.md"]);
+    expect(results[0]?.score).toBe(1);
+    await service.getChunks({ path: results[0]!.path });
+    await service.getNote({ path: results[0]!.path });
+    expect(performFetch).toHaveBeenCalledTimes(1);
+    expect(performFetch.mock.calls[0]?.[0]).toBe("https://openrouter.ai/api/v1/embeddings");
+    expect(JSON.parse(performFetch.mock.calls[0]?.[1]?.body as string)).toEqual({
+      model: value.model, input: ["общая память для AI"], encoding_format: "float",
+    });
+    expect(await storage.readVault(VAULT_A)).toEqual(before);
+    expect(mutate).not.toHaveBeenCalled();
+    expect(results[0]).not.toHaveProperty("vector");
+    expect(results[0]).not.toHaveProperty("embedding");
   });
 
   it("rejects a replacement descriptor committed while the query embedding is in flight", async () => {
