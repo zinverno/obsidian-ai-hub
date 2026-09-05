@@ -88,7 +88,7 @@ describe("Companion HTTP API", () => {
   it("accepts valid authentication", async () => {
     const response = await fetch(`${baseUrl}/v1/status`, { headers: headers() });
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ status: "ok", protocolVersion: 1, vaultCount: 0 });
+    expect(await response.json()).toEqual({ status: "ok", protocolVersion: 1, vaultCount: 0, qdrant: { enabled: false, state: "DISABLED" } });
   });
 
   it("rejects an incompatible protocol explicitly", async () => {

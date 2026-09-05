@@ -1,12 +1,13 @@
-import type { SemanticDescriptor } from "../protocol/types.js";
-import type { McpReadStorage, McpStoredVector } from "../storage/mcpReadStorage.js";
+import type { McpReadStorage, SearchSnapshot } from "../storage/mcpReadStorage.js";
 import { assertCompatibleDescriptor } from "./descriptor.js";
 import { boundedHeadings } from "./bounds.js";
 import { semanticSearchUnavailable } from "./errors.js";
 import type { QueryEmbeddingProvider } from "./queryEmbedding.js";
+import { normalizeQuery } from "../search/vectorMath.js";
+import { SQLiteVectorBackend } from "../search/sqliteVectorBackend.js";
+import { compareCandidates, sameSnapshot, sameSpace } from "../search/vectorBackend.js";
+import type { DerivedVectorBackend, SearchContext, VectorCandidate } from "../search/vectorBackend.js";
 
-const MIN_VECTOR_NORM = 1e-12;
-const STORED_UNIT_NORM_TOLERANCE = 1e-4;
 export const MAX_SEARCH_TEXT_CODE_POINTS = 4000;
 
 export interface McpSearchResult {
@@ -28,46 +29,6 @@ export interface McpSearchResult {
   textTruncated: boolean;
 }
 
-interface RankedVector {
-  record: McpStoredVector;
-  score: number;
-}
-
-function compareRank(left: RankedVector, right: RankedVector): number {
-  if (right.score !== left.score) return right.score - left.score;
-  return left.record.chunkId < right.record.chunkId ? -1 : left.record.chunkId > right.record.chunkId ? 1 : 0;
-}
-
-function vectorNorm(vector: Float32Array): number {
-  let squared = 0;
-  for (let index = 0; index < vector.length; index++) {
-    const value = vector[index] ?? Number.NaN;
-    if (!Number.isFinite(value)) throw semanticSearchUnavailable();
-    squared += value * value;
-  }
-  const norm = Math.sqrt(squared);
-  if (!Number.isFinite(norm) || norm <= MIN_VECTOR_NORM) throw semanticSearchUnavailable();
-  return norm;
-}
-
-function normalizeQuery(vector: Float32Array, dimensions: number): Float32Array {
-  if (vector.length !== dimensions) throw semanticSearchUnavailable();
-  const norm = vectorNorm(vector);
-  const result = new Float32Array(dimensions);
-  for (let index = 0; index < dimensions; index++) result[index] = (vector[index] ?? 0) / norm;
-  return result;
-}
-
-function scoreVector(stored: Float32Array, query: Float32Array): number {
-  if (stored.length !== query.length) throw semanticSearchUnavailable();
-  const norm = vectorNorm(stored);
-  if (Math.abs(norm - 1) > STORED_UNIT_NORM_TOLERANCE) throw semanticSearchUnavailable();
-  let score = 0;
-  for (let index = 0; index < stored.length; index++) score += (stored[index] ?? 0) * (query[index] ?? 0);
-  if (!Number.isFinite(score)) throw semanticSearchUnavailable();
-  return Math.max(-1, Math.min(1, score));
-}
-
 function boundedText(text: string): { text: string; totalTextChars: number; textTruncated: boolean } {
   const codePoints = Array.from(text);
   return {
@@ -77,53 +38,79 @@ function boundedText(text: string): { text: string; totalTextChars: number; text
   };
 }
 
-export class SqliteSemanticSearch {
+export class SemanticSearchService {
+  private readonly sqlite: SQLiteVectorBackend;
+
   constructor(
     private readonly storage: McpReadStorage,
     private readonly provider: QueryEmbeddingProvider,
-  ) {}
+    private readonly accelerator?: DerivedVectorBackend,
+  ) {
+    this.sqlite = new SQLiteVectorBackend(storage);
+  }
 
   async search(vaultId: string, query: string, limit: number): Promise<McpSearchResult[]> {
-    const status = await this.storage.getMcpVaultStatus(vaultId);
+    const status = await this.storage.getSearchSnapshot(vaultId);
     if (!status.exists || status.chunkCount === 0) return [];
-    const descriptor: SemanticDescriptor | null = status.descriptor;
+    const descriptor = status.descriptor;
     if (!descriptor) throw semanticSearchUnavailable();
     assertCompatibleDescriptor(descriptor);
-
     let queryVector: Float32Array;
     try {
       queryVector = normalizeQuery(await this.provider.embedQuery(descriptor, query), descriptor.dimensions);
     } catch {
       throw semanticSearchUnavailable();
     }
-
-    // A sync may commit while the provider request is in flight. Never use its
-    // query vector with a replacement space, or return a mixed generation.
-    const afterEmbedding = await this.storage.getMcpVaultStatus(vaultId);
-    if (JSON.stringify(afterEmbedding) !== JSON.stringify(status)) throw semanticSearchUnavailable();
-
-    const ranked: RankedVector[] = [];
-    try {
-      for (const record of this.storage.iterateMcpVectors(vaultId, descriptor.dimensions)) {
-        ranked.push({ record, score: scoreVector(record.vector, queryVector) });
-        ranked.sort(compareRank);
-        if (ranked.length > limit) ranked.length = limit;
+    const afterEmbedding = await this.storage.getSearchSnapshot(vaultId);
+    if (!sameSnapshot(afterEmbedding, status)) throw semanticSearchUnavailable();
+    const context: SearchContext = { snapshot: status, queryVector };
+    if (this.accelerator?.available(status)) {
+      try {
+        const candidates = await this.accelerator.search(context, limit);
+        const results = await this.hydrate(status, candidates, limit);
+        if (!this.accelerator.available(status)) throw semanticSearchUnavailable();
+        this.accelerator.recordBackend("qdrant");
+        return results;
+      } catch {
+        this.accelerator.invalidate();
+        // Fallback always reuses the already normalized query vector.
       }
+    }
+    try {
+      const current = await this.storage.getSearchSnapshot(vaultId);
+      if (!sameSpace(current.descriptor, descriptor)) throw semanticSearchUnavailable();
+      const candidates = await this.sqlite.search({ snapshot: current, queryVector }, limit);
+      const results = await this.hydrate(current, candidates, limit);
+      this.accelerator?.recordBackend("sqlite");
+      return results;
     } catch {
       throw semanticSearchUnavailable();
     }
-    const texts = await this.storage.getMcpChunkTexts(vaultId, ranked.map((item) => item.record.chunkId));
-    if (JSON.stringify(await this.storage.getMcpVaultStatus(vaultId)) !== JSON.stringify(status)) {
+  }
+
+  private async hydrate(snapshot: SearchSnapshot, candidates: VectorCandidate[], limit: number): Promise<McpSearchResult[]> {
+    if (new Set(candidates.map((item) => item.chunkId)).size !== candidates.length || candidates.length !== Math.min(limit, snapshot.chunkCount)) {
       throw semanticSearchUnavailable();
     }
-    return ranked.map(({ record, score }) => ({
-      path: record.path,
-      chunkId: record.chunkId,
-      ordinal: record.ordinal,
-      ...boundedHeadings(record.headingPath),
-      source: { ...record.source },
-      score,
-      ...boundedText(texts.get(record.chunkId) ?? ""),
-    }));
+    const chunks = await this.storage.getSearchChunks(snapshot.vaultId, candidates.map((item) => item.chunkId));
+    if (!sameSnapshot(await this.storage.getSearchSnapshot(snapshot.vaultId), snapshot)) throw semanticSearchUnavailable();
+    return candidates.sort(compareCandidates).map(({ chunkId, score }) => {
+      const record = chunks.get(chunkId);
+      if (!record || !Number.isFinite(score) || score < -1 || score > 1) throw semanticSearchUnavailable();
+      return {
+        path: record.path,
+        chunkId: record.chunkId,
+        ordinal: record.ordinal,
+        ...boundedHeadings(record.headingPath),
+        source: { ...record.source },
+        score,
+        ...boundedText(record.text),
+      };
+    });
   }
+}
+
+/** Kept as an independently testable, permanent SQLite-only entry point. */
+export class SqliteSemanticSearch extends SemanticSearchService {
+  constructor(storage: McpReadStorage, provider: QueryEmbeddingProvider) { super(storage, provider); }
 }

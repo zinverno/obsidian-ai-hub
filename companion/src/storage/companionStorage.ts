@@ -15,7 +15,17 @@ export interface StoredVaultSnapshot {
   notes: MirroredNote[];
 }
 
+export interface CommitNotice {
+  vaultId: string;
+  generation: number;
+  previousRevision: number;
+  revision: number;
+  replaceVault: boolean;
+  paths: readonly string[];
+}
+
 export interface CompanionStorage {
+  subscribeCommits(listener: (notice: CommitNotice) => void): () => void;
   initialize(): Promise<void>;
   close(): Promise<void>;
   getServerStatus(): Promise<{ vaultCount: number }>;

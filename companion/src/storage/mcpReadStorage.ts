@@ -30,9 +30,17 @@ export interface McpStoredVector {
   vector: Float32Array;
 }
 
+export interface SearchSnapshot extends VaultStatus {
+  /** Advances on every commit, including multiple batches of the same generation. */
+  revision: number;
+}
+
 /** Narrow, query-only view used by MCP. It deliberately exposes no mutation method. */
 export interface McpReadStorage {
   getMcpVaultStatus(vaultId: string): Promise<VaultStatus>;
+  getSearchSnapshot(vaultId: string): Promise<SearchSnapshot>;
+  getSearchChunks(vaultId: string, chunkIds: readonly string[]): Promise<Map<string, McpStoredChunk>>;
+  listVectorPage(vaultId: string, dimensions: number, after: string, limit: number, paths?: readonly string[]): McpStoredVector[];
   listMcpNotes(vaultId: string, prefix: string, afterPath: string, limit: number): Promise<McpNoteSummary[]>;
   getMcpNote(vaultId: string, path: string): Promise<McpStoredNote | null>;
   hasMcpNote(vaultId: string, path: string): Promise<boolean>;
@@ -49,6 +57,9 @@ export interface McpReadStorage {
 /** Runtime capability boundary as well as a TypeScript boundary. */
 export function createMcpReadView(storage: McpReadStorage): McpReadStorage {
   return Object.freeze({
+    getSearchSnapshot: storage.getSearchSnapshot.bind(storage),
+    getSearchChunks: storage.getSearchChunks.bind(storage),
+    listVectorPage: storage.listVectorPage.bind(storage),
     getMcpVaultStatus: storage.getMcpVaultStatus.bind(storage),
     listMcpNotes: storage.listMcpNotes.bind(storage),
     getMcpNote: storage.getMcpNote.bind(storage),

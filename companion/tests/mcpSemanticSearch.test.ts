@@ -67,8 +67,10 @@ describe("SQLite MCP semantic retrieval", () => {
       return value;
     });
     await storage.applyBatch(VAULT_A, upsertBatch(1, notes));
-    const results = await new SqliteSemanticSearch(storage, provider(new Float32Array([1, 0, 0])))
+    const pending = new SqliteSemanticSearch(storage, provider(new Float32Array([1, 0, 0])))
       .search(VAULT_A, "bounded", 5);
+    await expect(pending).resolves.toHaveLength(5);
+    const results = await pending;
     expect(results).toHaveLength(5);
     expect(results.map((item) => item.chunkId)).toEqual(["chunk-00", "chunk-01", "chunk-02", "chunk-03", "chunk-04"]);
     expect(JSON.stringify(results)).not.toMatch(/embedding|vector/iu);
