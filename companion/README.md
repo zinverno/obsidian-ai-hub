@@ -219,7 +219,7 @@ npm run smoke:mcp -- --codex
 
 The smoke command starts the same built entry point as `npm start`, provisions a disposable synthetic Vault via Stage 8 HTTP sync, runs every tool using official SDK clients, restarts Companion, and repeats all calls against persisted SQLite. Its local deterministic embedding fixture proves request counts; it does not test a live commercial provider or require an Obsidian Vault directory. The optional Codex mode launches an ephemeral client with per-invocation MCP configuration. Real Vault data and existing client configuration are not used.
 
-The SDK harness is the protocol conformance check; MCP Inspector GUI, Claude, and Cursor were not launched. The Stage 9 smoke ran with Obsidian already closed, so it verifies offline operation and process restart, not an interactive Obsidian open→close sequence. See [Stage 9 verification evidence](STAGE9_VERIFICATION.md).
+The SDK harness is the protocol conformance check; MCP Inspector GUI, Claude, and Cursor were not launched. The Stage 9 smoke ran with Obsidian already closed, so it verifies offline operation and process restart, not an interactive Obsidian open→close sequence.
 
 ## Protocol v1
 
