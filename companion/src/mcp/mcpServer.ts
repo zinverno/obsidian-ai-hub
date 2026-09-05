@@ -17,8 +17,10 @@ import {
   MAX_SEARCH_LIMIT,
   VaultMcpService,
 } from "./service.js";
-import { SqliteSemanticSearch } from "./semanticSearch.js";
+import { SemanticSearchService } from "./semanticSearch.js";
 import { MAX_CURSOR_LENGTH } from "./pagination.js";
+
+import type { DerivedVectorBackend } from "../search/vectorBackend.js";
 
 const dataTrustSchema = z.literal("untrusted-vault-data");
 const sourceSchema = z.strictObject({
@@ -111,8 +113,9 @@ export function createVaultMcpServer(
   config: McpConfig,
   logger: Logger,
   provider: QueryEmbeddingProvider,
+  backend?: DerivedVectorBackend,
 ): McpServer {
-  const service = new VaultMcpService(storage, config.vaultId, new SqliteSemanticSearch(storage, provider));
+  const service = new VaultMcpService(storage, config.vaultId, new SemanticSearchService(storage, provider, backend));
   const server = new McpServer({ name: "vault-audit-ai-companion", version: "0.1.0" }, {
     capabilities: { tools: { listChanged: false } },
   });
@@ -228,9 +231,10 @@ export function createVaultMcpHandler(
     apiKey: config.embeddingApiKey,
     timeoutMs: config.embeddingTimeoutMs,
   }),
+  backend?: DerivedVectorBackend,
 ): McpHttpHandler {
   return createMcpHandler(
-    () => createVaultMcpServer(storage, config, logger, provider),
+    () => createVaultMcpServer(storage, config, logger, provider, backend),
     {
       legacy: "stateless",
       responseMode: "auto",

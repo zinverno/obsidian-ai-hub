@@ -3,7 +3,7 @@ import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import { pathToFileURL } from "node:url";
 import { hostHeaderValidation, originValidation, toNodeHandler } from "@modelcontextprotocol/node";
 import { isAuthorized } from "./auth.js";
-import { loadConfig } from "./config.js";
+import { loadConfig, loadQdrantConfig } from "./config.js";
 import type { CompanionConfig } from "./config.js";
 import { createLogger } from "./logging/logger.js";
 import type { Logger } from "./logging/logger.js";
@@ -25,6 +25,10 @@ import type { McpReadStorage } from "./storage/mcpReadStorage.js";
 import { createMcpReadView } from "./storage/mcpReadStorage.js";
 import { SqliteCompanionStorage } from "./storage/sqliteCompanionStorage.js";
 import { ReconciliationService } from "./sync/reconciliation.js";
+
+import { QdrantVectorBackend } from "./search/qdrantBackend.js";
+import { QdrantClientIndex } from "./search/qdrantIndex.js";
+import type { QdrantVectorIndex } from "./search/qdrantIndex.js";
 
 function sendJson(response: ServerResponse, status: number, value: unknown): void {
   const body = JSON.stringify(value);
@@ -95,6 +99,7 @@ async function routeRequest(
   config: CompanionConfig,
   storage: CompanionStorage,
   reconciliation: ReconciliationService,
+  qdrant: QdrantVectorBackend | undefined,
   handleMcp: (request: IncomingMessage, response: ServerResponse) => Promise<void>,
 ): Promise<void> {
   const url = new URL(request.url ?? "/", "http://companion.invalid");
@@ -122,7 +127,8 @@ async function routeRequest(
   if (url.pathname === "/v1/status") {
     if (request.method !== "GET") methodNotAllowed();
     const status = await storage.getServerStatus();
-    sendJson(response, 200, { status: "ok", protocolVersion: PROTOCOL_VERSION, vaultCount: status.vaultCount });
+    sendJson(response, 200, { status: "ok", protocolVersion: PROTOCOL_VERSION, vaultCount: status.vaultCount,
+      qdrant: qdrant ? await qdrant.status() : { enabled: false, state: "DISABLED" } });
     return;
   }
 
@@ -151,11 +157,17 @@ export function createCompanionServer(
     config.token,
     config.mcp.token,
     config.mcp.embeddingApiKey,
+    config.qdrant?.apiKey ?? "",
   ]),
   queryEmbeddingProvider?: QueryEmbeddingProvider,
+  qdrantIndex?: QdrantVectorIndex,
 ): Server {
+  const qdrantConfig = config.qdrant ?? loadQdrantConfig({});
+  const qdrant = qdrantConfig.enabled ? new QdrantVectorBackend(storage, config.mcp.vaultId,
+    qdrantConfig, qdrantIndex ?? new QdrantClientIndex(qdrantConfig)) : undefined;
+  const unsubscribe = qdrant ? storage.subscribeCommits((notice) => qdrant.onCommit(notice)) : undefined;
   const reconciliation = new ReconciliationService(storage);
-  const mcpHandler = createVaultMcpHandler(createMcpReadView(storage), config.mcp, logger, queryEmbeddingProvider);
+  const mcpHandler = createVaultMcpHandler(createMcpReadView(storage), config.mcp, logger, queryEmbeddingProvider, qdrant);
   const allowedHosts = config.mcp.allowedHosts ?? ["localhost", "127.0.0.1", "[::1]"];
   const checkMcpHost = hostHeaderValidation(allowedHosts);
   const checkMcpOrigin = originValidation(allowedHosts);
@@ -198,12 +210,13 @@ export function createCompanionServer(
     await nodeMcpHandler(limitedRequest, response);
   };
   const server = createServer((request, response) => {
-    void routeRequest(request, response, config, storage, reconciliation, handleMcp).catch((error: unknown) => {
+    void routeRequest(request, response, config, storage, reconciliation, qdrant, handleMcp).catch((error: unknown) => {
       if (!response.headersSent) sendError(response, error, logger);
       else response.destroy();
     });
   });
-  server.once("close", () => void mcpHandler.close());
+  server.once("listening", () => qdrant?.start());
+  server.once("close", () => { unsubscribe?.(); qdrant?.close(); void mcpHandler.close(); });
   return server;
 }
 
@@ -213,6 +226,7 @@ export async function startCompanion(
     config.token,
     config.mcp.token,
     config.mcp.embeddingApiKey,
+    config.qdrant?.apiKey ?? "",
   ]),
 ): Promise<{ server: Server; storage: CompanionStorage }> {
   const storage = new SqliteCompanionStorage(config.dataDir);

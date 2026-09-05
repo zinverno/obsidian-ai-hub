@@ -13,6 +13,15 @@ export interface McpConfig {
   allowedHosts?: string[];
 }
 
+export interface QdrantConfig {
+  enabled: boolean;
+  url: string;
+  apiKey: string;
+  timeoutMs: number;
+  collectionPrefix: string;
+  allowInsecureRemoteHttp: boolean;
+}
+
 export interface CompanionConfig {
   host: string;
   port: number;
@@ -22,6 +31,7 @@ export interface CompanionConfig {
   logLevel: LogLevel;
   bodyLimitBytes: number;
   mcp: McpConfig;
+  qdrant?: QdrantConfig;
 }
 
 export class ConfigurationError extends Error {
@@ -74,6 +84,37 @@ export function isLoopbackHost(host: string): boolean {
   return false;
 }
 
+export function loadQdrantConfig(environment: NodeJS.ProcessEnv): QdrantConfig {
+  const enabled = booleanValue(environment.QDRANT_ENABLED, false, "QDRANT_ENABLED");
+  const allowInsecureRemoteHttp = booleanValue(
+    environment.QDRANT_ALLOW_INSECURE_REMOTE_HTTP, false, "QDRANT_ALLOW_INSECURE_REMOTE_HTTP",
+  );
+  let url: URL;
+  try {
+    url = new URL(environment.QDRANT_URL?.trim() || "http://127.0.0.1:6333");
+    if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.search || url.hash) {
+      throw new Error();
+    }
+  } catch {
+    throw new ConfigurationError("QDRANT_URL must be an HTTP(S) URL without credentials, query, or fragment.");
+  }
+  if (url.protocol === "http:" && !isLoopbackHost(url.hostname.replace(/^\[|\]$/gu, "")) && !allowInsecureRemoteHttp) {
+    throw new ConfigurationError("Non-loopback QDRANT_URL HTTP requires QDRANT_ALLOW_INSECURE_REMOTE_HTTP=true.");
+  }
+  const collectionPrefix = environment.QDRANT_COLLECTION_PREFIX?.trim() || "vault_audit";
+  if (!/^[a-zA-Z0-9_]{1,32}$/u.test(collectionPrefix)) {
+    throw new ConfigurationError("QDRANT_COLLECTION_PREFIX must contain 1 to 32 letters, digits, or underscores.");
+  }
+  const apiKey = environment.QDRANT_API_KEY?.trim() ?? "";
+  if (!/^[\x20-\x7E]*$/u.test(apiKey)) throw new ConfigurationError("QDRANT_API_KEY must contain printable ASCII characters.");
+  return {
+    enabled, url: url.toString().replace(/\/$/u, ""),
+    apiKey,
+    timeoutMs: positiveInteger(environment.QDRANT_TIMEOUT_MS, 5000, "QDRANT_TIMEOUT_MS", 100, 120_000),
+    collectionPrefix, allowInsecureRemoteHttp,
+  };
+}
+
 export function loadConfig(environment: NodeJS.ProcessEnv = process.env): CompanionConfig {
   const host = environment.HOST?.trim() || "127.0.0.1";
   if (!validHostname(host)) throw new ConfigurationError("HOST must be a valid IP address or hostname.");
@@ -110,6 +151,8 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Compan
   if (allowedHosts.length === 0 || allowedHosts.some((value) => !validHostname(value.replace(/^\[|\]$/gu, "")))) {
     throw new ConfigurationError("MCP_ALLOWED_HOSTS must contain explicit hostnames or IP addresses, without schemes or ports.");
   }
+  const qdrant = loadQdrantConfig(environment);
+  if (qdrant.enabled && !mcpVaultId) throw new ConfigurationError("MCP_VAULT_ID is required when QDRANT_ENABLED=true.");
   return {
     host,
     port,
@@ -118,6 +161,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Compan
     allowRemoteBind,
     logLevel: level as LogLevel,
     bodyLimitBytes: 16 * 1024 * 1024,
+    qdrant,
     mcp: {
       enabled: mcpEnabled,
       token: mcpToken,

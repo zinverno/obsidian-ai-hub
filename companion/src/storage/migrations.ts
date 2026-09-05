@@ -53,6 +53,7 @@ export const MIGRATIONS: readonly Migration[] = [
         ON chunks(vault_id, note_path, ordinal, chunk_id);
     `,
   },
+  { version: 2, sql: "ALTER TABLE vaults ADD COLUMN revision INTEGER NOT NULL DEFAULT 0;" },
 ];
 
 export function runMigrations(database: DatabaseSync): void {

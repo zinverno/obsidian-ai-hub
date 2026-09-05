@@ -15,8 +15,9 @@ import type {
   SyncOperation,
   VaultStatus,
 } from "../protocol/types.js";
-import type { CompanionStorage, StoredVaultSnapshot } from "./companionStorage.js";
+import type { CommitNotice, CompanionStorage, StoredVaultSnapshot } from "./companionStorage.js";
 import type {
+  SearchSnapshot,
   McpNoteSummary,
   McpReadStorage,
   McpStoredChunk,
@@ -26,6 +27,7 @@ import type {
 import { runMigrations } from "./migrations.js";
 
 interface VaultRow {
+  revision: number;
   vault_id: string;
   generation: number;
   descriptor_json: string;
@@ -154,6 +156,19 @@ function mcpChunk(row: McpChunkRow): McpStoredChunk {
 
 export class SqliteCompanionStorage implements CompanionStorage, McpReadStorage {
   private database: DatabaseSync | null = null;
+  private readonly commitListeners = new Set<(notice: CommitNotice) => void>();
+
+  subscribeCommits(listener: (notice: CommitNotice) => void): () => void {
+    this.commitListeners.add(listener);
+    return () => { this.commitListeners.delete(listener); };
+  }
+
+  private publishCommit(notice: CommitNotice): void {
+    for (const listener of this.commitListeners) {
+      // Derived observers can never make an authoritative commit fail.
+      try { listener(notice); } catch { /* Secondary work is isolated. */ }
+    }
+  }
 
   constructor(private readonly dataDir: string, private readonly filename = "companion.sqlite") {}
 
@@ -209,6 +224,34 @@ export class SqliteCompanionStorage implements CompanionStorage, McpReadStorage 
       chunkCount: counts.chunk_count,
       descriptor: parseDescriptor(row),
     };
+  }
+
+  async getSearchSnapshot(vaultId: string): Promise<SearchSnapshot> {
+    const revision = this.vaultRow(vaultId)?.revision ?? 0;
+    return { ...await this.getVaultStatus(vaultId), revision };
+  }
+
+  async getSearchChunks(vaultId: string, chunkIds: readonly string[]): Promise<Map<string, McpStoredChunk>> {
+    if (chunkIds.length === 0) return new Map();
+    const rows = this.db().prepare(`
+      SELECT chunk_id, note_path, ordinal, heading_path_json, text,
+             source_start_offset, source_end_offset, source_start_line, source_end_line
+      FROM chunks WHERE vault_id = ? AND chunk_id IN (${chunkIds.map(() => "?").join(",")})
+    `).all(vaultId, ...chunkIds) as unknown as McpChunkRow[];
+    return new Map(rows.map((row) => [row.chunk_id, mcpChunk(row)]));
+  }
+
+  listVectorPage(vaultId: string, dimensions: number, after: string, limit: number, paths?: readonly string[]): McpStoredVector[] {
+    const pathClause = paths ? ` AND note_path IN (${paths.map(() => "?").join(",")})` : "";
+    const rows = this.db().prepare(`
+      SELECT chunk_id, note_path, ordinal, heading_path_json,
+             source_start_offset, source_end_offset, source_start_line, source_end_line, embedding
+      FROM chunks WHERE vault_id = ? AND chunk_id > ? ${pathClause} ORDER BY chunk_id LIMIT ?
+    `).all(vaultId, after, ...(paths ?? []), limit) as unknown as McpVectorRow[];
+    return rows.map((row) => ({
+      ...mcpChunk({ ...row, text: "" }),
+      vector: decodeFloatVector(row.embedding, dimensions),
+    }));
   }
 
   async getMcpVaultStatus(vaultId: string): Promise<VaultStatus> {
@@ -357,17 +400,23 @@ export class SqliteCompanionStorage implements CompanionStorage, McpReadStorage 
     if (current && !batch.replaceVault && !descriptorEqual(parseDescriptor(current), batch.descriptor)) {
       throw new ProtocolError(409, "DESCRIPTOR_MISMATCH", "Incoming vectors use a different semantic descriptor.");
     }
+    const revision = (current?.revision ?? 0) + 1;
+    const paths = [...new Set(batch.operations.flatMap((operation) => operation.type === "DELETE"
+      ? [operation.path] : operation.type === "RENAME" ? [operation.oldPath, operation.note.path] : [operation.note.path]))];
     database.exec("BEGIN IMMEDIATE");
     try {
       if (batch.replaceVault) database.prepare("DELETE FROM vaults WHERE vault_id = ?").run(vaultId);
       this.upsertVault(vaultId, batch);
       for (const operation of batch.operations) this.applyOperation(vaultId, operation);
+      database.prepare("UPDATE vaults SET revision = ? WHERE vault_id = ?").run(revision, vaultId);
       database.exec("COMMIT");
     } catch (error) {
       database.exec("ROLLBACK");
       if (error instanceof ProtocolError) throw error;
       throw new ProtocolError(500, "STORAGE_ERROR", "The synchronization batch could not be committed.");
     }
+    this.publishCommit({ vaultId, generation: batch.generation, previousRevision: current?.revision ?? 0,
+      revision, replaceVault: batch.replaceVault ?? false, paths });
     return {
       protocolVersion: PROTOCOL_VERSION,
       generation: batch.generation,
@@ -431,7 +480,7 @@ export class SqliteCompanionStorage implements CompanionStorage, McpReadStorage 
 
   private vaultRow(vaultId: string): VaultRow | null {
     return (this.db().prepare(`
-      SELECT vault_id, generation, descriptor_json, embedding_space_id, dimensions
+      SELECT vault_id, generation, descriptor_json, embedding_space_id, dimensions, revision
       FROM vaults WHERE vault_id = ?
     `).get(vaultId) as VaultRow | undefined) ?? null;
   }

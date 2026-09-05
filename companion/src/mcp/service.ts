@@ -5,7 +5,7 @@ import { McpToolError } from "./errors.js";
 import { boundedHeadings } from "./bounds.js";
 import { chunksCursor, notesCursor, parseChunksCursor, parseNotesCursor } from "./pagination.js";
 import type { McpSearchResult } from "./semanticSearch.js";
-import { SqliteSemanticSearch } from "./semanticSearch.js";
+import type { SemanticSearchService } from "./semanticSearch.js";
 
 export const DEFAULT_LIST_LIMIT = 50;
 export const MAX_LIST_LIMIT = 200;
@@ -66,12 +66,12 @@ export interface VaultStatusOutput {
 }
 
 export class VaultMcpService {
-  private readonly semanticSearch: SqliteSemanticSearch;
+  private readonly semanticSearch: SemanticSearchService;
 
   constructor(
     private readonly storage: McpReadStorage,
     private readonly vaultId: string,
-    semanticSearch: SqliteSemanticSearch,
+    semanticSearch: SemanticSearchService,
   ) {
     this.semanticSearch = semanticSearch;
   }
