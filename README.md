@@ -211,7 +211,7 @@ Vault Audit AI separates local storage from provider-side processing so you can 
 - When Companion sync is enabled, the configured endpoint receives a stable random Vault ID, vault-relative paths, current Markdown, full chunk text, chunk/source metadata, embeddings, and semantic descriptor metadata. Localhost keeps that mirror on the same machine; a remote endpoint transmits and persists it on that server.
 - Remote Companion endpoints must use HTTPS. The Companion bearer token is independent of embedding and language-model credentials; provider API keys are never sent to Companion.
 - Changing Companion enablement, endpoint, token, timeout, or identity invalidates obsolete queued synchronization. An old plan cannot start later batches or retries, and disabling synchronization does not delete either the local semantic index or already mirrored Companion data.
-- Companion has no telemetry, MCP, agents, note editing, or Vault write-back.
+- Companion optionally exposes read-only MCP for one configured Vault using a separate read token. MCP clients can retrieve mirrored content while Obsidian is closed; semantic search sends only the query to a separately configured Companion embedding provider. Companion has no telemetry, agents, note editing, or Vault write-back.
 - Writing, batch, and audit operations send the content required for the requested action to the configured language-model provider.
 - Clipboard insertion writes generated output to the system clipboard.
 
@@ -285,6 +285,8 @@ Stable chunk hashes drive incremental deltas so unchanged chunks are reused.
 
 An optional standalone [Companion service](companion/README.md) receives versioned JSON over HTTP(S) after local semantic commits. Snapshot capture reuses the committed vectors and releases the semantic barrier before network I/O. Deterministic manifest reconciliation avoids retransmitting unchanged Markdown or embeddings and repairs events missed while either process was offline.
 
+Companion can expose that persistent mirror through an opt-in [read-only MCP endpoint](companion/README.md#mcp). It runs independently of Obsidian and provides bounded note/chunk retrieval and semantic search with a separate read credential.
+
 A debounced event coordinator coalesces Markdown path changes, while startup reconciliation catches offline changes. Manual and automatic indexing share one mutation queue. Rename batches reach the vector store as one durable mutation.
 
 The vector store uses guarded temporary-file replacement, backup-aware recovery, and one shared store per semantic index path in the plugin runtime. Document discovery reads a defensive committed snapshot from that same store.
@@ -297,7 +299,7 @@ Clear and rebuild are explicit operations and do not modify source notes.
 - Ask your Vault is a one-shot question flow; it does not keep a multi-turn conversation history.
 - Automatic synchronization covers Markdown notes only; attachments, Canvas files, images, and other file types are ignored.
 - The vector store does not use an ANN or HNSW index.
-- Companion v0 is a self-hosted read-only mirror. It provides no retrieval API for end users, MCP, dashboard, accounts, TLS termination, or write-back; read-only MCP is deferred to a later stage.
+- Companion is a self-hosted mirror with optional read-only MCP scoped to one configured Vault. It provides no dashboard, accounts, OAuth server, TLS termination, or write-back. MCP semantic retrieval scans SQLite linearly.
 - Companion requires Node.js 24 or newer and uses Node's built-in SQLite API, which Node 24 currently labels experimental.
 - Obsidian `requestUrl` cannot physically cancel a transport already handed off. Timeout, abort, disable, or configuration invalidation prevents subsequent queued requests, plan-to-batch transitions, batches, and retries, but the already-started HTTP transport may still finish.
 - Similarity search performs a local linear scan and is intended for small and medium personal vaults.

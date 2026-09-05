@@ -1,11 +1,14 @@
 import { createServer } from "node:http";
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import { pathToFileURL } from "node:url";
+import { hostHeaderValidation, originValidation, toNodeHandler } from "@modelcontextprotocol/node";
 import { isAuthorized } from "./auth.js";
 import { loadConfig } from "./config.js";
 import type { CompanionConfig } from "./config.js";
 import { createLogger } from "./logging/logger.js";
 import type { Logger } from "./logging/logger.js";
+import { createVaultMcpHandler } from "./mcp/mcpServer.js";
+import type { QueryEmbeddingProvider } from "./mcp/queryEmbedding.js";
 import { ProtocolError, publicError } from "./protocol/errors.js";
 import {
   parseReconciliationPlanRequest,
@@ -18,6 +21,8 @@ import {
 } from "./protocol/types.js";
 import type { ErrorResponse } from "./protocol/types.js";
 import type { CompanionStorage } from "./storage/companionStorage.js";
+import type { McpReadStorage } from "./storage/mcpReadStorage.js";
+import { createMcpReadView } from "./storage/mcpReadStorage.js";
 import { SqliteCompanionStorage } from "./storage/sqliteCompanionStorage.js";
 import { ReconciliationService } from "./sync/reconciliation.js";
 
@@ -90,11 +95,20 @@ async function routeRequest(
   config: CompanionConfig,
   storage: CompanionStorage,
   reconciliation: ReconciliationService,
+  handleMcp: (request: IncomingMessage, response: ServerResponse) => Promise<void>,
 ): Promise<void> {
   const url = new URL(request.url ?? "/", "http://companion.invalid");
   if (url.pathname === "/health") {
     if (request.method !== "GET") methodNotAllowed();
     sendJson(response, 200, { status: "ok", protocolVersion: PROTOCOL_VERSION });
+    return;
+  }
+  if (url.pathname === "/mcp") {
+    if (!config.mcp.enabled) throw new ProtocolError(404, "NOT_FOUND", "Route not found.");
+    if (!isAuthorized(request.headers.authorization, config.mcp.token)) {
+      throw new ProtocolError(401, "AUTH_REQUIRED", "Valid MCP Bearer authentication is required.");
+    }
+    await handleMcp(request, response);
     return;
   }
   if (!url.pathname.startsWith("/v1/")) {
@@ -132,21 +146,74 @@ async function routeRequest(
 
 export function createCompanionServer(
   config: CompanionConfig,
-  storage: CompanionStorage,
-  logger: Logger = createLogger(config.logLevel, [config.token]),
+  storage: CompanionStorage & McpReadStorage,
+  logger: Logger = createLogger(config.logLevel, [
+    config.token,
+    config.mcp.token,
+    config.mcp.embeddingApiKey,
+  ]),
+  queryEmbeddingProvider?: QueryEmbeddingProvider,
 ): Server {
   const reconciliation = new ReconciliationService(storage);
-  return createServer((request, response) => {
-    void routeRequest(request, response, config, storage, reconciliation).catch((error: unknown) => {
+  const mcpHandler = createVaultMcpHandler(createMcpReadView(storage), config.mcp, logger, queryEmbeddingProvider);
+  const allowedHosts = config.mcp.allowedHosts ?? ["localhost", "127.0.0.1", "[::1]"];
+  const checkMcpHost = hostHeaderValidation(allowedHosts);
+  const checkMcpOrigin = originValidation(allowedHosts);
+  const nodeMcpHandler = toNodeHandler(mcpHandler, {
+    onerror: () => logger.error("MCP HTTP adapter failed."),
+  });
+  const handleMcp = async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
+    if (!checkMcpHost(request, response) || !checkMcpOrigin(request, response)) return;
+    response.setHeader("cache-control", "no-store");
+    response.setHeader("x-content-type-options", "nosniff");
+    const contentLength = request.headers["content-length"];
+    if (
+      typeof contentLength === "string" &&
+      /^\d+$/u.test(contentLength) &&
+      Number(contentLength) > config.mcp.bodyLimitBytes
+    ) {
+      throw new ProtocolError(413, "REQUEST_TOO_LARGE", "MCP request body exceeds the configured limit.");
+    }
+    let bytes = 0;
+    const body: Buffer[] = [];
+    if (request.method !== "GET" && request.method !== "HEAD") {
+      for await (const raw of request.iterator({ destroyOnReturn: false })) {
+        const chunk = Buffer.isBuffer(raw) ? raw : Buffer.from(raw as Uint8Array);
+        bytes += chunk.byteLength;
+        if (bytes > config.mcp.bodyLimitBytes) {
+          request.resume();
+          throw new ProtocolError(413, "REQUEST_TOO_LARGE", "MCP request body exceeds the configured limit.");
+        }
+        body.push(chunk);
+      }
+    }
+    const limitedRequest = {
+      method: request.method ?? "GET",
+      url: request.url ?? "/mcp",
+      headers: request.headers,
+      async *[Symbol.asyncIterator](): AsyncGenerator<Uint8Array> {
+        yield* body;
+      },
+    };
+    await nodeMcpHandler(limitedRequest, response);
+  };
+  const server = createServer((request, response) => {
+    void routeRequest(request, response, config, storage, reconciliation, handleMcp).catch((error: unknown) => {
       if (!response.headersSent) sendError(response, error, logger);
       else response.destroy();
     });
   });
+  server.once("close", () => void mcpHandler.close());
+  return server;
 }
 
 export async function startCompanion(
   config: CompanionConfig = loadConfig(),
-  logger: Logger = createLogger(config.logLevel, [config.token]),
+  logger: Logger = createLogger(config.logLevel, [
+    config.token,
+    config.mcp.token,
+    config.mcp.embeddingApiKey,
+  ]),
 ): Promise<{ server: Server; storage: CompanionStorage }> {
   const storage = new SqliteCompanionStorage(config.dataDir);
   await storage.initialize();

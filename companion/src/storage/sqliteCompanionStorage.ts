@@ -16,6 +16,13 @@ import type {
   VaultStatus,
 } from "../protocol/types.js";
 import type { CompanionStorage, StoredVaultSnapshot } from "./companionStorage.js";
+import type {
+  McpNoteSummary,
+  McpReadStorage,
+  McpStoredChunk,
+  McpStoredNote,
+  McpStoredVector,
+} from "./mcpReadStorage.js";
 import { runMigrations } from "./migrations.js";
 
 interface VaultRow {
@@ -31,6 +38,28 @@ interface NoteRow {
   content: string;
   content_hash: string;
   metadata_json: string;
+}
+
+interface McpNoteSummaryRow {
+  path: string;
+  content_hash: string;
+  chunk_count: number;
+}
+
+interface McpChunkRow {
+  chunk_id: string;
+  note_path: string;
+  ordinal: number;
+  heading_path_json: string;
+  text: string;
+  source_start_offset: number;
+  source_end_offset: number;
+  source_start_line: number;
+  source_end_line: number;
+}
+
+interface McpVectorRow extends Omit<McpChunkRow, "text"> {
+  embedding: Uint8Array;
 }
 
 interface ChunkRow {
@@ -68,13 +97,13 @@ function encodeVector(values: readonly number[]): Buffer {
   return output;
 }
 
-function decodeVector(value: Uint8Array, dimensions: number): number[] {
+function decodeFloatVector(value: Uint8Array, dimensions: number): Float32Array {
   const bytes = Buffer.from(value.buffer, value.byteOffset, value.byteLength);
   if (bytes.byteLength !== dimensions * 4) {
     throw new ProtocolError(500, "STORAGE_ERROR", "Stored embedding dimensions are invalid.");
   }
-  const result: number[] = [];
-  for (let index = 0; index < dimensions; index++) result.push(bytes.readFloatLE(index * 4));
+  const result = new Float32Array(dimensions);
+  for (let index = 0; index < dimensions; index++) result[index] = bytes.readFloatLE(index * 4);
   return result;
 }
 
@@ -107,7 +136,23 @@ function parseStringArray(value: string): string[] {
   throw new ProtocolError(500, "STORAGE_ERROR", "Stored chunk metadata is invalid.");
 }
 
-export class SqliteCompanionStorage implements CompanionStorage {
+function mcpChunk(row: McpChunkRow): McpStoredChunk {
+  return {
+    chunkId: row.chunk_id,
+    path: row.note_path,
+    ordinal: row.ordinal,
+    headingPath: parseStringArray(row.heading_path_json),
+    text: row.text,
+    source: {
+      startOffset: row.source_start_offset,
+      endOffset: row.source_end_offset,
+      startLine: row.source_start_line,
+      endLine: row.source_end_line,
+    },
+  };
+}
+
+export class SqliteCompanionStorage implements CompanionStorage, McpReadStorage {
   private database: DatabaseSync | null = null;
 
   constructor(private readonly dataDir: string, private readonly filename = "companion.sqlite") {}
@@ -164,6 +209,96 @@ export class SqliteCompanionStorage implements CompanionStorage {
       chunkCount: counts.chunk_count,
       descriptor: parseDescriptor(row),
     };
+  }
+
+  async getMcpVaultStatus(vaultId: string): Promise<VaultStatus> {
+    return this.getVaultStatus(vaultId);
+  }
+
+  async listMcpNotes(
+    vaultId: string,
+    prefix: string,
+    afterPath: string,
+    limit: number,
+  ): Promise<McpNoteSummary[]> {
+    const rows = this.db().prepare(`
+      SELECT notes.path, notes.content_hash,
+             (SELECT COUNT(*) FROM chunks
+              WHERE chunks.vault_id = notes.vault_id AND chunks.note_path = notes.path) AS chunk_count
+      FROM notes
+      WHERE notes.vault_id = ? AND notes.path > ?
+        AND substr(notes.path, 1, length(?)) = ?
+      ORDER BY notes.path
+      LIMIT ?
+    `).all(vaultId, afterPath, prefix, prefix, limit) as unknown as McpNoteSummaryRow[];
+    return rows.map((row) => ({ path: row.path, contentHash: row.content_hash, chunkCount: row.chunk_count }));
+  }
+
+  async getMcpNote(vaultId: string, path: string): Promise<McpStoredNote | null> {
+    const row = this.db().prepare(`
+      SELECT path, content, content_hash
+      FROM notes WHERE vault_id = ? AND path = ?
+    `).get(vaultId, path) as Pick<NoteRow, "path" | "content" | "content_hash"> | undefined;
+    return row ? { path: row.path, content: row.content, contentHash: row.content_hash } : null;
+  }
+
+  async hasMcpNote(vaultId: string, path: string): Promise<boolean> {
+    return this.db().prepare("SELECT 1 FROM notes WHERE vault_id = ? AND path = ?").get(vaultId, path) !== undefined;
+  }
+
+  async listMcpChunks(
+    vaultId: string,
+    path: string,
+    after: { ordinal: number; chunkId: string } | null,
+    limit: number,
+  ): Promise<McpStoredChunk[]> {
+    const afterOrdinal = after?.ordinal ?? -1;
+    const afterChunkId = after?.chunkId ?? "";
+    const rows = this.db().prepare(`
+      SELECT chunk_id, note_path, ordinal, heading_path_json, text,
+             source_start_offset, source_end_offset, source_start_line, source_end_line
+      FROM chunks
+      WHERE vault_id = ? AND note_path = ?
+        AND (ordinal > ? OR (ordinal = ? AND chunk_id > ?))
+      ORDER BY ordinal, chunk_id
+      LIMIT ?
+    `).all(vaultId, path, afterOrdinal, afterOrdinal, afterChunkId, limit) as unknown as McpChunkRow[];
+    return rows.map(mcpChunk);
+  }
+
+  *iterateMcpVectors(vaultId: string, dimensions: number): Iterable<McpStoredVector> {
+    const rows = this.db().prepare(`
+      SELECT chunk_id, note_path, ordinal, heading_path_json,
+             source_start_offset, source_end_offset, source_start_line, source_end_line, embedding
+      FROM chunks WHERE vault_id = ? ORDER BY chunk_id
+    `).iterate(vaultId) as Iterable<McpVectorRow>;
+    for (const row of rows) {
+      yield {
+        chunkId: row.chunk_id,
+        path: row.note_path,
+        ordinal: row.ordinal,
+        headingPath: parseStringArray(row.heading_path_json),
+        source: {
+          startOffset: row.source_start_offset,
+          endOffset: row.source_end_offset,
+          startLine: row.source_start_line,
+          endLine: row.source_end_line,
+        },
+        vector: decodeFloatVector(row.embedding, dimensions),
+      };
+    }
+  }
+
+  async getMcpChunkTexts(vaultId: string, chunkIds: readonly string[]): Promise<Map<string, string>> {
+    const result = new Map<string, string>();
+    if (chunkIds.length === 0) return result;
+    const placeholders = chunkIds.map(() => "?").join(", ");
+    const rows = this.db().prepare(`
+      SELECT chunk_id, text FROM chunks
+      WHERE vault_id = ? AND chunk_id IN (${placeholders})
+    `).all(vaultId, ...chunkIds) as unknown as Array<{ chunk_id: string; text: string }>;
+    for (const row of rows) result.set(row.chunk_id, row.text);
+    return result;
   }
 
   async planReconciliation(
@@ -271,7 +406,7 @@ export class SqliteCompanionStorage implements CompanionStorage {
           startLine: row.source_start_line,
           endLine: row.source_end_line,
         },
-        embedding: decodeVector(row.embedding, descriptor.dimensions),
+        embedding: Array.from(decodeFloatVector(row.embedding, descriptor.dimensions)),
       });
       chunksByPath.set(row.note_path, values);
     }
