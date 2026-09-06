@@ -59,6 +59,11 @@ import {
 import type { StoredCompanionSettings } from "./companionSync";
 import { ObsidianSemanticController } from "./semantic";
 
+import { CompanionClient } from "./companionSync/client";
+import { ProposalApplication } from "./proposals/application";
+import { ObsidianProposalVault } from "./proposals/obsidianVault";
+import { ProposalReviewModal } from "./proposals/reviewModal";
+
 type Mode = "simple" | "selection" | "vault";
 
 interface VaultAuditStats {
@@ -74,6 +79,7 @@ export default class AIHubPlugin extends Plugin {
   lastPrompt = "";
   private noteIndexPromise: Promise<NoteIndexManager> | null = null;
   private semanticController!: ObsidianSemanticController;
+  private proposalApplication: { signature: string; value: ProposalApplication } | null = null;
 
   getSemanticController(): ObsidianSemanticController {
     return this.semanticController;
@@ -99,6 +105,16 @@ export default class AIHubPlugin extends Plugin {
       setLanguage(this.settings.language ?? "auto");
       this.semanticController = new ObsidianSemanticController(this);
       this.semanticController.registerCommands();
+      this.addCommand({ id: "review-ai-change-proposals", name: "Review AI change proposals", callback: () => {
+        const settings = this.settings.companion;
+        if (!settings.enabled) { new Notice("Enable companion integration to review proposals."); return; }
+        const signature = JSON.stringify(settings);
+        try {
+          if (this.proposalApplication?.signature !== signature) this.proposalApplication = { signature,
+            value: new ProposalApplication(new CompanionClient({ ...settings }), settings.vaultId, new ObsidianProposalVault(this.app)) };
+          new ProposalReviewModal(this.app, this.proposalApplication.value).open();
+        } catch { new Notice("Check the companion configuration before reviewing proposals."); }
+      } });
       this.semanticController.registerAutomaticSync();
       this.register(() => void this.semanticController.dispose());
 

@@ -54,6 +54,20 @@ export const MIGRATIONS: readonly Migration[] = [
     `,
   },
   { version: 2, sql: "ALTER TABLE vaults ADD COLUMN revision INTEGER NOT NULL DEFAULT 0;" },
+  {
+    version: 3,
+    sql: `CREATE TABLE proposals (
+      proposal_id TEXT PRIMARY KEY NOT NULL, vault_id TEXT NOT NULL,
+      operation TEXT NOT NULL CHECK (operation IN ('CREATE_NOTE','UPDATE_NOTE','DELETE_NOTE')),
+      path TEXT NOT NULL, base_content_hash TEXT, base_content TEXT,
+      proposed_content TEXT, proposed_content_hash TEXT, summary TEXT NOT NULL,
+      status TEXT NOT NULL CHECK (status IN ('PENDING','CLAIMED','APPLIED','REJECTED','CONFLICT','FAILED','EXPIRED')),
+      created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+      claimed_at INTEGER, claim_expires_at INTEGER, claim_id TEXT, applied_at INTEGER, status_code TEXT
+    ) STRICT;
+    CREATE INDEX proposals_by_vault ON proposals(vault_id, created_at, proposal_id);
+    CREATE INDEX proposals_by_status ON proposals(status, updated_at);`,
+  },
 ];
 
 export function runMigrations(database: DatabaseSync): void {

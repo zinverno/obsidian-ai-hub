@@ -5,6 +5,7 @@ const production = process.argv.includes('production');
 async function main() {
   await esbuild.build({
     entryPoints: ['main.ts'],
+    tsconfig: 'tsconfig.json',
     bundle: true,
     external: ['obsidian'],
     keepNames: true,

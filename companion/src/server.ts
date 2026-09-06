@@ -30,6 +30,9 @@ import { QdrantVectorBackend } from "./search/qdrantBackend.js";
 import { QdrantClientIndex } from "./search/qdrantIndex.js";
 import type { QdrantVectorIndex } from "./search/qdrantIndex.js";
 
+import { createMcpProposalCapability } from "./proposals/storage.js";
+import type { ProposalCompletion } from "./proposals/types.js";
+
 function sendJson(response: ServerResponse, status: number, value: unknown): void {
   const body = JSON.stringify(value);
   response.writeHead(status, {
@@ -132,6 +135,29 @@ async function routeRequest(
     return;
   }
 
+  const proposalRoute = /^\/v1\/vaults\/([^/]+)\/proposals(?:\/([^/]+)(?:\/(claim|complete|reject))?)?$/u.exec(url.pathname);
+  if (proposalRoute?.[1]) {
+    const vaultId = validateVaultId(decodeURIComponent(proposalRoute[1]));
+    const id = proposalRoute[2] ? decodeURIComponent(proposalRoute[2]) : undefined;
+    const action = proposalRoute[3]; const proposals = storage.getProposalStore();
+    if (!action) {
+      if (request.method !== "GET") methodNotAllowed();
+      if ([...url.searchParams.keys()].some((key) => !["cursor", "limit"].includes(key))) throw new ProtocolError(400, "INVALID_REQUEST", "Invalid proposal query.");
+      sendJson(response, 200, { protocolVersion: PROTOCOL_VERSION, ...(id ? { proposal: proposals.get(vaultId, id) } :
+        proposals.list(vaultId, url.searchParams.get("cursor") ?? "", Number(url.searchParams.get("limit") ?? 20))) });
+      return;
+    }
+    if (request.method !== "POST") methodNotAllowed();
+    const body = await readJson(request, 4096);
+    if (!body || typeof body !== "object" || Array.isArray(body) || (action !== "complete" && Object.keys(body).length > 0)) {
+      throw new ProtocolError(400, "INVALID_REQUEST", "Invalid proposal management request.");
+    }
+    const result = action === "claim" ? proposals.claim(vaultId, id!) : { proposal: action === "reject"
+      ? proposals.reject(vaultId, id!) : proposals.complete(vaultId, id!, body as ProposalCompletion) };
+    sendJson(response, 200, { protocolVersion: PROTOCOL_VERSION, ...result });
+    return;
+  }
+
   const match = /^\/v1\/vaults\/([^/]+)\/(status|reconcile\/plan|sync\/batch)$/u.exec(url.pathname);
   if (!match?.[1] || !match[2]) throw new ProtocolError(404, "NOT_FOUND", "Route not found.");
   const vaultId = validateVaultId(decodeURIComponent(match[1]));
@@ -167,7 +193,8 @@ export function createCompanionServer(
     qdrantConfig, qdrantIndex ?? new QdrantClientIndex(qdrantConfig)) : undefined;
   const unsubscribe = qdrant ? storage.subscribeCommits((notice) => qdrant.onCommit(notice)) : undefined;
   const reconciliation = new ReconciliationService(storage);
-  const mcpHandler = createVaultMcpHandler(createMcpReadView(storage), config.mcp, logger, queryEmbeddingProvider, qdrant);
+  const mcpHandler = createVaultMcpHandler(createMcpReadView(storage), config.mcp, logger, queryEmbeddingProvider, qdrant,
+    createMcpProposalCapability(storage.getProposalStore(), config.mcp.vaultId));
   const allowedHosts = config.mcp.allowedHosts ?? ["localhost", "127.0.0.1", "[::1]"];
   const checkMcpHost = hostHeaderValidation(allowedHosts);
   const checkMcpOrigin = originValidation(allowedHosts);

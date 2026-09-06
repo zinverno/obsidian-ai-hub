@@ -26,6 +26,8 @@ import type {
 } from "./mcpReadStorage.js";
 import { runMigrations } from "./migrations.js";
 
+import { SqliteProposalStorage } from "../proposals/storage.js";
+
 interface VaultRow {
   revision: number;
   vault_id: string;
@@ -156,6 +158,8 @@ function mcpChunk(row: McpChunkRow): McpStoredChunk {
 
 export class SqliteCompanionStorage implements CompanionStorage, McpReadStorage {
   private database: DatabaseSync | null = null;
+
+  getProposalStore(): SqliteProposalStorage { return new SqliteProposalStorage(this.db()); }
   private readonly commitListeners = new Set<(notice: CommitNotice) => void>();
 
   subscribeCommits(listener: (notice: CommitNotice) => void): () => void {

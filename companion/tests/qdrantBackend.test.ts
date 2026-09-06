@@ -239,7 +239,7 @@ describe("Qdrant derived search lifecycle", () => {
     await seed(); const before = await storage.readVault(VAULT_A);
     backend.close(); unsubscribe(); await storage.close();
     const old = new DatabaseSync(join(directory, "companion.sqlite"));
-    old.exec("ALTER TABLE vaults DROP COLUMN revision; PRAGMA user_version = 1"); old.close();
+    old.exec("DROP TABLE proposals; ALTER TABLE vaults DROP COLUMN revision; PRAGMA user_version = 1"); old.close();
     storage = new SqliteCompanionStorage(directory); await storage.initialize();
     expect(await storage.readVault(VAULT_A)).toEqual(before);
     expect((await storage.getSearchSnapshot(VAULT_A)).revision).toBe(0);
