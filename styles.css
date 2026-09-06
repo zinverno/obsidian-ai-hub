@@ -1633,7 +1633,7 @@
 .ai-proposal-detail-header { min-height: 0; max-height: min(32vh, 240px); margin-bottom: 16px; overflow: auto; }
 .ai-proposal-detail-body { display: flex; flex-direction: column; }
 .ai-proposal-detail-body > * { flex-shrink: 0; }
-.ai-proposal-detail-body .ai-proposal-diff-panel { flex: 1 1 auto; min-height: 180px; }
+.ai-proposal-detail-body .ai-proposal-diff-panel { flex: 1 1 auto; min-height: min-content; }
 .ai-proposal-footer {
     display: flex;
     flex: 0 0 auto;
@@ -1651,10 +1651,10 @@
 .ai-proposal-decisions button { min-width: 92px; }
 .ai-proposal-shell button.ai-proposal-quiet { background: transparent; box-shadow: none; color: var(--text-muted); }
 .ai-proposal-shell button.ai-proposal-quiet:hover { background: var(--background-modifier-hover); color: var(--text-normal); }
-.ai-proposal-diff-panel { display: flex; flex-direction: column; min-width: 0; border: 1px solid var(--background-modifier-border); border-radius: var(--radius-m); overflow: hidden; }
+.ai-proposal-diff-panel { display: grid; grid-template-rows: auto minmax(140px, 1fr) auto; min-width: 0; border: 1px solid var(--background-modifier-border); border-radius: var(--radius-m); overflow: hidden; }
 .ai-proposal-diff-legend { flex-shrink: 0; display: flex; justify-content: space-between; flex-wrap: wrap; gap: 6px 16px; padding: 12px; background: var(--background-secondary); color: var(--text-muted); font-size: var(--font-ui-smaller); }
 .ai-proposal-diff-title { color: var(--text-normal); font-weight: var(--font-semibold); }
-.ai-proposal-diff { min-height: 0; max-height: min(44vh, 420px); min-width: 0; overflow: auto; overscroll-behavior: contain; }
+.ai-proposal-diff { min-height: 140px; max-height: min(44vh, 420px); min-width: 0; overflow: auto; overscroll-behavior: contain; }
 .ai-proposal-diff-line { display: flex; min-width: 0; font-family: var(--font-monospace); font-size: var(--font-ui-small); line-height: 1.65; }
 .ai-proposal-line-numbers { display: flex; flex: 0 0 13ch; gap: 1ch; padding: 3px 8px; border-right: 1px solid var(--background-modifier-border); color: var(--text-muted); user-select: none; }
 .ai-proposal-line-numbers span { width: 6ch; text-align: right; }
