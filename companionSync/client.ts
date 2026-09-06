@@ -13,6 +13,8 @@ import type {
 } from "./types";
 import { isLocalCompanionEndpoint } from "./settings";
 
+import type { ProposalClaim, ProposalCompletion, ProposalDetail, ProposalPage, ProposalSummary } from "../companion/src/proposals/types";
+
 export type CompanionClientErrorCode =
   | "CONFIGURATION_ERROR"
   | "AUTH_REQUIRED"
@@ -95,6 +97,28 @@ export class CompanionClient {
 
   applyBatch(vaultId: string, batch: CompanionSyncBatch, signal?: AbortSignal): Promise<CompanionSyncBatchResult> {
     return this.request(`/v1/vaults/${encodeURIComponent(vaultId)}/sync/batch`, "POST", batch, signal);
+  }
+
+  async listProposals(vaultId: string, cursor = ""): Promise<ProposalPage> {
+    return this.request(`/v1/vaults/${encodeURIComponent(vaultId)}/proposals?cursor=${encodeURIComponent(cursor)}`, "GET");
+  }
+  async getProposal(vaultId: string, id: string): Promise<ProposalDetail> {
+    const result = await this.request<{ proposal: ProposalDetail }>(this.proposalPath(vaultId, id), "GET");
+    return result.proposal;
+  }
+  async claimProposal(vaultId: string, id: string): Promise<ProposalClaim> {
+    return this.request(`${this.proposalPath(vaultId, id)}/claim`, "POST", {});
+  }
+  async completeProposal(vaultId: string, id: string, body: ProposalCompletion): Promise<ProposalSummary> {
+    const result = await this.request<{ proposal: ProposalSummary }>(`${this.proposalPath(vaultId, id)}/complete`, "POST", body);
+    return result.proposal;
+  }
+  async rejectProposal(vaultId: string, id: string): Promise<ProposalSummary> {
+    const result = await this.request<{ proposal: ProposalSummary }>(`${this.proposalPath(vaultId, id)}/reject`, "POST", {});
+    return result.proposal;
+  }
+  private proposalPath(vaultId: string, id: string): string {
+    return `/v1/vaults/${encodeURIComponent(vaultId)}/proposals/${encodeURIComponent(id)}`;
   }
 
   private async request<T>(path: string, method: string, body?: unknown, signal?: AbortSignal): Promise<T> {

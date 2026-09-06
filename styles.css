@@ -1564,3 +1564,12 @@
         width: 100%;
     }
 }
+
+/* Proposal Markdown is displayed as inert text, with explicit diff signs. */
+.ai-proposal-row { border-bottom: 1px solid var(--background-modifier-border); padding: 12px 0; }
+.ai-proposal-diff { max-height: 55vh; overflow: auto; margin: 12px 0; }
+.ai-proposal-diff pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; padding: 2px 8px; }
+.ai-proposal-added { background: var(--background-modifier-success); }
+.ai-proposal-removed { background: var(--background-modifier-error); }
+.ai-proposal-context { color: var(--text-muted); }
+.ai-proposal-error { color: var(--text-warning); }
