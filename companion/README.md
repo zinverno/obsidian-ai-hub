@@ -2,7 +2,7 @@
 
 Companion v0 is a standalone Node.js service that stores a persistent, read-only mirror of Vault Audit AI semantic state. The same source and build run locally and on a Linux VPS; only environment variables differ.
 
-Companion never opens an Obsidian Vault directory or writes Markdown. Its optional read-only MCP endpoint retrieves the persisted mirror even while Obsidian is closed. There is no write-back.
+Companion never opens an Obsidian Vault directory or writes Markdown. Its optional MCP endpoint retrieves the persisted mirror and queues change proposals even while Obsidian is closed. Only the Obsidian plugin can apply a proposal after an explicit human approval click.
 
 ## Requirements
 
@@ -99,7 +99,7 @@ An optional systemd unit can run `npm start` with `WorkingDirectory` set to the 
 | `ALLOW_REMOTE_BIND` | `false` | Must be `true` for a non-loopback `HOST`. |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, or `error`. |
 | `MCP_ENABLED` | `false` | Enable `/mcp`; otherwise the route returns 404. |
-| `MCP_TOKEN` | none | Separate read credential, required when MCP is enabled. Must differ from `COMPANION_TOKEN`. |
+| `MCP_TOKEN` | none | Separate read/proposal credential, required when MCP is enabled. Must differ from `COMPANION_TOKEN`. |
 | `MCP_VAULT_ID` | none | Exactly one UUID from the plugin's Companion identity. Required when MCP is enabled. |
 | `MCP_EMBEDDING_API_KEY` | empty | Companion-owned query embedding credential; never saved to SQLite. |
 | `MCP_EMBEDDING_TIMEOUT_MS` | `30000` | Query HTTP timeout, 500–120000 ms. No retries. |
@@ -123,11 +123,11 @@ MCP_ALLOWED_HOSTS=127.0.0.1,localhost,[::1],vault.example.com
 
 Local clients connect to `http://127.0.0.1:27124/mcp`; remote clients use `https://vault.example.com/mcp` through the existing HTTPS reverse proxy. Both use `Authorization: Bearer <MCP_TOKEN>`. MCP requests do not need the Stage 8 `X-Companion-Protocol-Version` header.
 
-`COMPANION_TOKEN` can update the mirror through `/v1/`; `MCP_TOKEN` only authenticates `/mcp`. Neither credential authenticates the other's routes. Equal configured tokens fail startup to prevent a read credential accidentally granting sync privileges. Anyone holding the MCP token can read the configured Vault's mirrored content; keep the token private and use HTTPS outside loopback. Public unauthenticated access and an OAuth server are not provided.
+`COMPANION_TOKEN` can update the mirror through `/v1/`; `MCP_TOKEN` only authenticates `/mcp`. Neither credential authenticates the other's routes. Equal configured tokens fail startup to prevent an MCP credential accidentally granting sync or approval privileges. Anyone holding the MCP token can read the configured Vault's mirrored content and queue proposals; keep the token private and use HTTPS outside loopback. Public unauthenticated access and an OAuth server are not provided.
 
 The implementation uses the official TypeScript SDK packages `@modelcontextprotocol/server` and `@modelcontextprotocol/node`, pinned to **2.0.0**, with Zod 4 schemas. The SDK's `createMcpHandler` serves protocol **2026-07-28** and its built-in stateless legacy initialize path. Tests exercise **2025-11-25** legacy negotiation as well. A fresh MCP server is built per request; there is no session ID, resumability, or standalone `/sse` endpoint. Legacy GET/DELETE session operations return 405. Modern calls produce JSON; legacy calls may use an SSE response on the same Streamable HTTP endpoint. No change notifications or subscriptions are offered. [Official SDK HTTP serving guide](https://github.com/modelcontextprotocol/typescript-sdk/blob/main/docs/serving/http.md)
 
-Every tool operates on the one server-configured `MCP_VAULT_ID`. There is no vault enumeration tool, and all input objects reject unknown properties, including `vaultId`. MCP receives a frozen read capability object with no sync, migration, initialization, or database-write methods.
+Every tool operates on the one server-configured `MCP_VAULT_ID`. There is no vault enumeration tool, and all input objects reject unknown properties, including `vaultId`. The five retrieval tools receive a frozen read capability with no sync, migration, initialization or database-write methods. The proposal tools receive a separate frozen capability exposing only proposal `create` and `get`, scoped to the same Vault. Neither capability can claim, complete or approve a proposal.
 
 | Tool | Inputs | Bounded result |
 | --- | --- | --- |
@@ -136,6 +136,8 @@ Every tool operates on the one server-configured `MCP_VAULT_ID`. There is no vau
 | `get_note` | `path`, `startOffset?`, `maxChars?` | Exact Markdown slice; default 12000, maximum 50000 Unicode code points, plus offsets, total size, and truncation flag. |
 | `get_chunks` | `path`, `limit?`, `cursor?` | Chunk IDs, paths, ordinals, headings, source ranges, and text; default 20, maximum 50, up to 8000 code points per chunk. |
 | `search_vault` | `query`, `limit?` | Top matching chunks with score and source metadata; default 5, maximum 20, up to 4000 code points per chunk. |
+| `propose_change` | `operation`, `path`, operation-specific content/hash, `summary?` | Proposal UUID, operation, path, summary, status and timestamps; no body echo. |
+| `get_proposal` | `proposalId` | Same safe proposal state, including terminal outcomes. No claim credential or note content. |
 
 Queries are trimmed, limited to 2000 Unicode code points, and reject NUL. Paths use the Stage 8 canonical vault-relative validation. Cursors are opaque continuation markers bound to the prefix or note path; clients must reuse them unchanged. They are not snapshot tokens: synchronization between pages can change later results. Empty lists return no cursor. Missing notes return `NOTE_NOT_FOUND`; malformed cursors return `INVALID_CURSOR`.
 
@@ -217,7 +219,7 @@ npm run smoke:mcp
 npm run smoke:mcp -- --codex
 ```
 
-The smoke command starts the same built entry point as `npm start`, provisions a disposable synthetic Vault via Stage 8 HTTP sync, runs every tool using official SDK clients, restarts Companion, and repeats all calls against persisted SQLite. Its local deterministic embedding fixture proves request counts; it does not test a live commercial provider or require an Obsidian Vault directory. The optional Codex mode launches an ephemeral client with per-invocation MCP configuration. Real Vault data and existing client configuration are not used.
+The smoke command starts the same built entry point as `npm start`, provisions a disposable synthetic Vault via Stage 8 HTTP sync, discovers all seven tools and exercises the five retrieval tools using official SDK clients, restarts Companion, and repeats all calls against persisted SQLite. Its local deterministic embedding fixture proves request counts; it does not test a live commercial provider or require an Obsidian Vault directory. The optional Codex mode launches an ephemeral client with per-invocation MCP configuration. Real Vault data and existing client configuration are not used.
 
 The SDK harness is the protocol conformance check; MCP Inspector GUI, Claude, and Cursor were not launched. The Stage 9 smoke ran with Obsidian already closed, so it verifies offline operation and process restart, not an interactive Obsidian open→close sequence.
 
@@ -396,4 +398,54 @@ The Vault remains authoritative. Companion's schema contains `vaults`, `notes`, 
 
 When synchronization is enabled, the configured endpoint receives the stable random vault ID, vault-relative note paths, current Markdown, chunk text, chunk/source metadata, embeddings, and semantic descriptor metadata. A localhost mirror remains on the same machine. A remote mirror transmits and persists that Vault data on the remote server.
 
-Embedding/LLM provider API keys are never sent by the plugin. The Companion sync bearer token is independent of those credentials and is stored in Obsidian plugin data within the security constraints of an Obsidian Community Plugin. Optional MCP access exposes mirrored paths, Markdown, chunks, and search results to the configured client; similarity scores reveal information about embeddings indirectly, but raw vectors are not exposed. Search sends the query to the descriptor's embedding provider. Logs contain only tool names, latency, outcome, and safe error codes. There is no telemetry, account system, permissive browser CORS, agent, or Vault write-back.
+Embedding/LLM provider API keys are never sent by the plugin. The Companion sync bearer token is independent of those credentials and is stored in Obsidian plugin data within the security constraints of an Obsidian Community Plugin. Optional MCP access exposes mirrored paths, Markdown, chunks, and search results to the configured client; similarity scores reveal information about embeddings indirectly, but raw vectors are not exposed. Search sends the query to the descriptor's embedding provider. Logs contain only tool names, latency, outcome, and safe error codes. There is no telemetry, account system, permissive browser CORS, agent, or direct Companion Vault write. Proposal content and its immutable base snapshot are stored in SQLite; approval occurs only in Obsidian.
+
+## Safe change proposals
+
+`propose_change` **DOES NOT MODIFY THE VAULT**. It stores an immutable proposal in SQLite for explicit human review through the plugin's **Review AI change proposals** command. There is one `/mcp` endpoint; no apply, write-file, rename, shell or approval MCP tool exists.
+
+| Operation | Required fields | Mirror precondition |
+| --- | --- | --- |
+| `CREATE_NOTE` | `path`, `proposedContent` | Target does not exist. `expectedContentHash` is forbidden. |
+| `UPDATE_NOTE` | `path`, `expectedContentHash`, `proposedContent` | Current mirrored hash matches; content must differ from the base. |
+| `DELETE_NOTE` | `path`, `expectedContentHash` | Current mirrored hash matches. `proposedContent` is forbidden. |
+
+All operations accept an optional `summary`. Unknown fields are rejected. Paths are at most 4096 UTF-16 code units, relative Markdown paths with canonical `/` separators; absolute paths, traversal, URLs, control characters, malformed separators and `.obsidian` are rejected. The plugin also rejects its actual custom configuration directory. Proposed content and the immutable base snapshot are each limited to 250,000 Unicode code points and cannot contain NUL. Summaries are limited to 2,000 code points. The existing 1 MiB MCP request limit still applies, so heavily escaped JSON may reach the byte limit first.
+
+UPDATE uses exact whole-note replacement without fuzzy patches or rebasing. Obtain the full note through bounded/paginated `get_note` before constructing replacement content. The canonical hash is the existing `stableHash` over UTF-16 code units, now shared with the plugin; CRLF and LF remain different, preserving historical sync semantics. Because this hash is not cryptographic, approval additionally compares the exact immutable base text and verifies exact resulting text. No-op UPDATE proposals are rejected to avoid ambiguous replay after a lost acknowledgement.
+
+Schema migration 3 adds a separate `proposals` table: random UUIDv4 identity, Vault UUID, operation/path, base content/hash, proposed content/hash, summary, state, epoch-millisecond creation/update/claim/expiry/application timestamps, random claim ID and fixed status code. Proposal writes never update notes, chunks, vectors, generation, revision, commit subscribers or Qdrant. The table survives mirror descriptor replacement and normal Companion restarts.
+
+```text
+PENDING -> CLAIMED -> APPLIED | CONFLICT | FAILED
+   |          |
+   |          +-- lease expires --> PENDING
+   +-- explicit Reject ----------> REJECTED
+   +-- older than 30 days -------> EXPIRED
+```
+
+APPLIED, CONFLICT, FAILED, REJECTED and EXPIRED are terminal. Claim and completion run in SQLite transactions. A 120-second lease has a random claim ID; only that claim may complete, and two clients cannot hold it simultaneously. Expiry is processed on subsequent proposal access, and a new claim invalidates the old one. Repeated identical completion for the same terminal claim is idempotent. Rejection is idempotent while already REJECTED and is forbidden once claimed. Client-name metadata is not used for authorization. MCP cancellation and listing are deferred.
+
+The following HTTP endpoints require **COMPANION_TOKEN** and `X-Companion-Protocol-Version: 1`. MCP_TOKEN receives 401, including for reads on these privileged routes.
+
+| Method and route | Behavior |
+| --- | --- |
+| `GET /v1/vaults/:vaultId/proposals` | Pending/claimed summaries; `limit` defaults to 20, maximum 50; use the returned `nextCursor`. UUID-order pages are not snapshots. |
+| `GET /v1/vaults/:vaultId/proposals/:id` | Full bounded immutable proposal for review. |
+| `POST /v1/vaults/:vaultId/proposals/:id/claim` | Empty `{}` body; returns proposal, claimId and leaseDurationMs. |
+| `POST /v1/vaults/:vaultId/proposals/:id/complete` | `claimId`, `status` and required fixed error `statusCode` for failures/conflicts. Records an outcome only. |
+| `POST /v1/vaults/:vaultId/proposals/:id/reject` | Empty `{}` body; persists rejection only. |
+
+Completion statuses are APPLIED (no code), CONFLICT (`PRECONDITION_FAILED`), or FAILED (`VAULT_WRITE_FAILED`, `VERIFY_FAILED`, `LEASE_EXPIRED`). No arbitrary error messages, stacks or note text are stored as status codes. These endpoints do not access the Vault filesystem or perform synchronization.
+
+After an explicit Approve click, the plugin claims immediately before applying, checks path and current content, then writes through `vault.create`, `vault.process` (hash/text validation inside its atomic callback), or `fileManager.trashFile` after a fresh read. CREATE rechecks absence; missing UPDATE/DELETE targets conflict. The plugin checks a conservative monotonic lease deadline immediately before writing and verifies the resulting content or absence before acknowledging APPLIED. Duplicate clicks share one in-flight operation. Write failures are never silently retried. Parent folders must already exist; deletion follows Obsidian's trash preference. External filesystem editors cannot participate in an atomic delete comparison; Obsidian's API provides no cross-process compare-and-delete transaction.
+
+**APPLIED means the real Vault write succeeded, not that the mirror is synchronized.** Existing Obsidian file events drive normal semantic AutoSync, then Companion sync and optional Qdrant updates. Enable those existing integrations for eventual mirror updates. Proposal code never pushes a synthetic mirror batch. A Companion outage before claim prevents any write; an outage after a successful claim/write may leave acknowledgement pending. The plugin keeps session-local receipts so another attempt only retries acknowledgement. After a plugin crash or expired lease, inspect the actual note: re-approval checks the original immutable base/absence, producing a conflict when that write already took effect. There is no distributed exactly-once transaction across SQLite and Obsidian, and no automatic rebase or recovery write.
+
+The plugin fetches proposals manually when the modal opens or Refresh is clicked; there is no polling or auto-approval. Diff pages contain up to 200 inert text lines and distinguish additions, removals and context. Proposed Markdown and summaries are untrusted and never executed as HTML. Obsidian can remain closed while clients queue proposals; files remain unchanged until explicit approval after reopening.
+
+**Privacy:** creating proposals transmits proposed Markdown to Companion. Remote deployment stores both proposed content and the mirrored base snapshot on the remote server. Proposal creation/rejection cause zero embedding-provider calls and zero Qdrant operations; proposal content is not sent to telemetry. An approved edit can subsequently be embedded by the plugin's ordinary configured AutoSync flow. Protect and back up Companion's SQLite data directory accordingly.
+
+Retention runs conservatively on proposal access: pending proposals older than 30 days expire; terminal history is retained for at least 30 days after its last update, then up to 200 old rows are removed per maintenance pass. At most 100 pending/claimed proposals per Vault and 2,000 total rows are accepted. Full queues return PROPOSAL_LIMIT. There is no destructive cleanup MCP tool.
+
+Permanent proposal tests run with the ordinary plugin and Companion test commands. The cross-project Stage 11 mutation probes require a full checkout with both dependency sets installed: `node companion/scripts/proposal-mutation-audit.mjs` from the repository root. They mutate only disposable copies in the OS temporary directory. Companion's regular build, tests, and existing `npm run audit:mutations` remain independent in a Companion-only sparse checkout.
