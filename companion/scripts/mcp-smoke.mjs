@@ -104,7 +104,7 @@ async function exercise(era, phase) {
   await client.connect(new StreamableHTTPClientTransport(new URL(`${baseUrl}/mcp`), { authProvider: { token: async () => readToken } }));
   try {
     assert.equal(client.getProtocolEra(), era);
-    assert.equal((await client.listTools()).tools.length, 5);
+    assert.equal((await client.listTools()).tools.length, 7);
     for (const [name, args] of [
       ["vault_status", {}], ["list_notes", {}], ["get_note", { path: "Demo.md" }],
       ["get_chunks", { path: "Demo.md" }], ["search_vault", { query: "launch code", limit: 1 }],

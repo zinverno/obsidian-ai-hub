@@ -121,9 +121,9 @@ describe("MCP Streamable HTTP endpoint", () => {
       "list_notes",
       "get_note",
       "get_chunks",
-      "search_vault",
+      "search_vault", "propose_change", "get_proposal",
     ]);
-    for (const tool of first.tools) {
+    for (const tool of first.tools.filter((tool) => tool.name !== "propose_change")) {
       expect(JSON.stringify(tool.inputSchema)).not.toContain("vaultId");
       expect(tool.annotations).toMatchObject({ readOnlyHint: true, destructiveHint: false });
     }
@@ -135,7 +135,7 @@ describe("MCP Streamable HTTP endpoint", () => {
     const client = await connect("legacy");
     expect(client.getProtocolEra()).toBe("legacy");
     expect(client.getNegotiatedProtocolVersion()).toMatch(/^2025-/u);
-    expect((await client.listTools()).tools).toHaveLength(5);
+    expect((await client.listTools()).tools).toHaveLength(7);
   });
 
   it("enforces MCP and sync token privilege separation in both directions", async () => {

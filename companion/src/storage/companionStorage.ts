@@ -25,6 +25,7 @@ export interface CommitNotice {
 }
 
 export interface CompanionStorage {
+  getProposalStore(): import("../proposals/storage.js").ProposalStore;
   subscribeCommits(listener: (notice: CommitNotice) => void): () => void;
   initialize(): Promise<void>;
   close(): Promise<void>;

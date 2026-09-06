@@ -37,7 +37,7 @@ describe("Qdrant HTTP/MCP integration", () => {
       expect((await fetch(`${base}/v1/status`, { headers: { ...headers, authorization: `Bearer ${config.mcp.token}` } })).status).toBe(401);
       await client.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`), { authProvider: { token: async (): Promise<string> => config.mcp.token } }));
       const tools = await client.listTools();
-      expect(tools.tools.map((tool) => tool.name)).toEqual(["vault_status", "list_notes", "get_note", "get_chunks", "search_vault"]);
+      expect(tools.tools.map((tool) => tool.name)).toEqual(["vault_status", "list_notes", "get_note", "get_chunks", "search_vault", "propose_change", "get_proposal"]);
       expect(JSON.stringify(tools)).not.toMatch(/qdrant|backend/iu);
       const request = { name: "search_vault", arguments: { query: "private query", limit: 1 } };
       expect((await client.callTool(request)).isError).not.toBe(true);

@@ -22,6 +22,9 @@ import { MAX_CURSOR_LENGTH } from "./pagination.js";
 
 import type { DerivedVectorBackend } from "../search/vectorBackend.js";
 
+import { registerProposalTools } from "../proposals/mcpTools.js";
+import type { McpProposalCapability } from "../proposals/storage.js";
+
 const dataTrustSchema = z.literal("untrusted-vault-data");
 const sourceSchema = z.strictObject({
   startOffset: z.number().int().nonnegative(),
@@ -72,6 +75,8 @@ function errorResult(error: unknown): CallToolResult {
   if (error instanceof McpToolError) {
     code = error.code;
     message = error.message;
+  } else if (error instanceof ProtocolError && error.code.startsWith("PROPOSAL_")) {
+    code = error.code; message = error.message;
   } else if (error instanceof ProtocolError && error.code === "INVALID_REQUEST") {
     code = "INVALID_ARGUMENT";
     message = error.message;
@@ -114,6 +119,7 @@ export function createVaultMcpServer(
   logger: Logger,
   provider: QueryEmbeddingProvider,
   backend?: DerivedVectorBackend,
+  proposals?: McpProposalCapability,
 ): McpServer {
   const service = new VaultMcpService(storage, config.vaultId, new SemanticSearchService(storage, provider, backend));
   const server = new McpServer({ name: "vault-audit-ai-companion", version: "0.1.0" }, {
@@ -220,6 +226,7 @@ export function createVaultMcpServer(
     },
     (input) => executeTool(logger, "search_vault", () => service.searchVault(input)),
   );
+  if (proposals) registerProposalTools(server, proposals, (name, operation) => executeTool(logger, name, operation));
   return server;
 }
 
@@ -232,9 +239,10 @@ export function createVaultMcpHandler(
     timeoutMs: config.embeddingTimeoutMs,
   }),
   backend?: DerivedVectorBackend,
+  proposals?: McpProposalCapability,
 ): McpHttpHandler {
   return createMcpHandler(
-    () => createVaultMcpServer(storage, config, logger, provider, backend),
+    () => createVaultMcpServer(storage, config, logger, provider, backend, proposals),
     {
       legacy: "stateless",
       responseMode: "auto",
